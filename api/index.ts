@@ -1,9 +1,5 @@
 import "dotenv/config";
 import express, { type Request, type Response, type NextFunction } from "express";
-import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { appRouter } from "../server/routers";
-import { createContext } from "../server/_core/context";
-import { registerStorageProxy } from "../server/_core/storageProxy";
 
 const app = express();
 
@@ -44,20 +40,62 @@ app.get(FILE_LIKE_PATHS, (_req: Request, res: Response) => {
   res.status(404).json({ error: "Not found" });
 });
 
-registerStorageProxy(app);
+// Lazy-initialize heavy modules so init errors are visible in the response
+let _initPromise: Promise<void> | null = null;
+let _initError: unknown = null;
+let _initialized = false;
 
-app.use(
-  "/api/trpc",
-  createExpressMiddleware({
-    router: appRouter,
-    createContext,
-    onError({ error }) {
-      // Suppress internal error details from public responses (CSC-003)
-      if (error.code === "INTERNAL_SERVER_ERROR") {
-        console.error("[tRPC]", error);
-      }
-    },
-  })
-);
+async function initialize(): Promise<void> {
+  try {
+    const [
+      { createExpressMiddleware },
+      { appRouter },
+      { createContext },
+      { registerStorageProxy },
+    ] = await Promise.all([
+      import("@trpc/server/adapters/express"),
+      import("../server/routers"),
+      import("../server/_core/context"),
+      import("../server/_core/storageProxy"),
+    ]);
+
+    registerStorageProxy(app);
+
+    app.use(
+      "/api/trpc",
+      createExpressMiddleware({
+        router: appRouter,
+        createContext,
+        onError({ error }) {
+          if (error.code === "INTERNAL_SERVER_ERROR") {
+            console.error("[tRPC]", error);
+          }
+        },
+      })
+    );
+  } catch (e) {
+    _initError = e;
+    throw e;
+  } finally {
+    _initialized = true;
+  }
+}
+
+app.use(async (req: Request, res: Response, next: NextFunction) => {
+  if (!_initPromise) _initPromise = initialize();
+  try {
+    await _initPromise;
+    next();
+  } catch (_e) {
+    const err = _initError as any;
+    // Return the full error so we can diagnose ERR_MODULE_NOT_FOUND
+    res.status(500).json({
+      initError: true,
+      code: err?.code ?? "UNKNOWN",
+      message: err?.message ?? String(err),
+      requireStack: err?.requireStack ?? [],
+    });
+  }
+});
 
 export default app;
