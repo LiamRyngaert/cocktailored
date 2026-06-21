@@ -1,5 +1,5 @@
 import "dotenv/config";
-import express from "express";
+import express, { type Request, type Response, type NextFunction } from "express";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "../server/routers";
 import { createContext } from "../server/_core/context";
@@ -12,7 +12,7 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
 
 // Security headers for API responses
-app.use((_req, res, next) => {
+app.use((_req: Request, res: Response, next: NextFunction) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
@@ -40,7 +40,7 @@ const FILE_LIKE_PATHS = [
   "/openapi.json",
   "/manifest.json",
 ];
-app.get(FILE_LIKE_PATHS, (_req, res) => {
+app.get(FILE_LIKE_PATHS, (_req: Request, res: Response) => {
   res.status(404).json({ error: "Not found" });
 });
 

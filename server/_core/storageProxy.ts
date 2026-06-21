@@ -1,10 +1,10 @@
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import type { Express } from "express";
+import type { Application, Request, Response } from "express";
 import { ENV } from "./env";
 
-export function registerStorageProxy(app: Express) {
-  app.get("/storage/:key(*)", async (req, res) => {
+export function registerStorageProxy(app: Application) {
+  app.get("/storage/:key(*)", async (req: Request, res: Response) => {
     const key = (req.params as Record<string, string>).key;
     if (!key) {
       res.status(400).send("Missing storage key");

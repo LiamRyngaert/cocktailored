@@ -113,3 +113,5 @@ temp/
 client/public/__manus__/
 .manus-logs/
 .project-config.json
+
+.vercel
