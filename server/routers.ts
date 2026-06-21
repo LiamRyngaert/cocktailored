@@ -290,9 +290,11 @@ export const appRouter = router({
         if (input.username.trim() !== ENV.adminUsername.trim() || input.password !== ENV.adminPassword.trim()) {
           throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
         }
+        const proto = ctx.req.headers["x-forwarded-proto"] as string | undefined;
+        const isHttps = ctx.req.protocol === "https" || (proto ? proto.split(",").some((p) => p.trim() === "https") : false) || ENV.isProduction;
         ctx.res.cookie(ADMIN_SESSION_KEY, "authenticated", {
           httpOnly: true,
-          secure: ctx.req.protocol === "https",
+          secure: isHttps,
           sameSite: "none",
           maxAge: 60 * 60 * 24 * 7,
           path: "/",
