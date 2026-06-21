@@ -4,7 +4,7 @@
   "buildCommand": "node scripts/build-api.mjs && vite build",
   "outputDirectory": "dist/public",
   "functions": {
-    "api/server.cjs": {
+    "api/server.mjs": {
       "maxDuration": 30
     }
   },
