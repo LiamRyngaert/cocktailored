@@ -142,7 +142,6 @@ export default function Quiz() {
   const [, setLocation] = useLocation();
   const [phase, setPhase] = useState<QuizPhase>("name");
   const [guestName, setGuestName] = useState("");
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [currentQ, setCurrentQ] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [animState, setAnimState] = useState<"in" | "out" | "splash">("in");
@@ -150,39 +149,27 @@ export default function Quiz() {
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [nameError, setNameError] = useState("");
 
-  const startMutation = trpc.quiz.start.useMutation();
-  const saveAnswerMutation = trpc.quiz.saveAnswer.useMutation();
   const generateMutation = trpc.quiz.generate.useMutation();
 
   const question = QUESTIONS[currentQ];
   const progress = ((currentQ) / QUESTIONS.length) * 100;
 
-  const handleStartQuiz = async () => {
+  const handleStartQuiz = () => {
     if (!guestName.trim()) {
       setNameError("Tell us your name first!");
       return;
     }
-    const result = await startMutation.mutateAsync({ guestName: guestName.trim() });
-    setSessionId(result.sessionId);
     setPhase("questions");
     setAnimState("in");
   };
 
-  const handleAnswer = async (value: string) => {
-    if (!sessionId || selectedOption) return;
+  const handleAnswer = (value: string) => {
+    if (selectedOption) return;
     setSelectedOption(value);
 
-    // Save answer
-    await saveAnswerMutation.mutateAsync({
-      sessionId,
-      questionId: question.id,
-      question: question.question,
-      answer: value,
-    });
+    const newAnswers = { ...answers, [question.id]: value };
+    setAnswers(newAnswers);
 
-    setAnswers((prev) => ({ ...prev, [question.id]: value }));
-
-    // Animate out, show splash, animate in
     setAnimState("out");
     setTimeout(() => {
       setShowSplash(true);
@@ -196,20 +183,29 @@ export default function Quiz() {
         setSelectedOption(null);
         setAnimState("in");
       } else {
-        // All questions answered, generate
         setPhase("generating");
-        handleGenerate(sessionId);
+        handleGenerate(newAnswers);
       }
     }, 1000);
   };
 
-  const handleGenerate = async (sid: string) => {
+  const handleGenerate = async (collectedAnswers: Record<number, string>) => {
+    const answersArray = QUESTIONS.map((q) => ({
+      questionId: q.id,
+      question: q.question,
+      answer: collectedAnswers[q.id] ?? "",
+    })).filter((a) => a.answer);
+
     try {
-      const result = await generateMutation.mutateAsync({ sessionId: sid });
+      const result = await generateMutation.mutateAsync({
+        guestName: guestName.trim() || undefined,
+        answers: answersArray,
+      });
+      // Store result in localStorage so the result page can access it immediately
+      localStorage.setItem(`quiz_result_${result.sessionId}`, JSON.stringify(result));
       setLocation(`/result/${result.sessionId}`);
     } catch (err) {
       console.error("Generation failed:", err);
-      setLocation(`/result/${sid}`);
     }
   };
 
@@ -248,11 +244,10 @@ export default function Quiz() {
             {nameError && <p className="text-red-400 text-sm mb-3">{nameError}</p>}
             <button
               onClick={handleStartQuiz}
-              disabled={startMutation.isPending}
-              className="w-full rounded-xl py-4 text-lg font-bold text-black transition-all duration-200 active:scale-95 disabled:opacity-50"
+              className="w-full rounded-xl py-4 text-lg font-bold text-black transition-all duration-200 active:scale-95"
               style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}
             >
-              {startMutation.isPending ? "Starting..." : "Start the Quiz →"}
+              Start the Quiz →
             </button>
           </div>
         </div>

@@ -480,35 +480,44 @@ Rules:
       }),
 
     generate: publicProcedure
-      .input(z.object({ sessionId: z.string().min(8).max(64) }))
+      .input(z.object({
+        guestName: z.string().max(128).optional(),
+        answers: z.array(z.object({
+          questionId: z.number(),
+          question: z.string(),
+          answer: z.string(),
+        })).min(1).max(20),
+      }))
       .mutation(async ({ input }) => {
-        const session = await getQuizSession(input.sessionId);
-        if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Session not found" });
+        const sessionId = nanoid(16);
+        const guestName = input.guestName ? sanitizeText(input.guestName) : null;
 
-        // Return cached result if already generated (CSC-008 cost abuse prevention)
-        if (session.completed && session.recipes) {
-          return { flavorProfile: session.flavorProfile, recipes: session.recipes, sessionId: input.sessionId };
-        }
+        // Persist session (best-effort — in-memory fallback is fine here too)
+        await createQuizSession({
+          sessionId,
+          guestName,
+          answers: input.answers,
+          completed: false,
+          webhookSent: false,
+        });
 
         const availableIngredients = await getAvailableIngredients();
-        const answers = session.answers as Array<{ questionId: number; question: string; answer: string }>;
-
-        const result = await generateCocktailWithClaude(answers, availableIngredients);
+        const result = await generateCocktailWithClaude(input.answers, availableIngredients);
 
         const webhookUrl = await getAdminSetting("webhook_url");
         let webhookSent = false;
         if (webhookUrl) {
-          webhookSent = await fireWebhook(webhookUrl, input.sessionId, session.guestName, answers, result.recipes, result.flavorProfile);
+          webhookSent = await fireWebhook(webhookUrl, sessionId, guestName, input.answers, result.recipes, result.flavorProfile);
         }
 
-        await updateQuizSession(input.sessionId, {
+        await updateQuizSession(sessionId, {
           flavorProfile: result.flavorProfile,
           recipes: result.recipes,
           completed: true,
           webhookSent,
         });
 
-        return { flavorProfile: result.flavorProfile, recipes: result.recipes, sessionId: input.sessionId };
+        return { flavorProfile: result.flavorProfile, recipes: result.recipes, sessionId };
       }),
 
     getResult: publicProcedure

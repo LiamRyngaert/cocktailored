@@ -192,12 +192,24 @@ export default function Result() {
   const [activeRecipe, setActiveRecipe] = useState(0);
   const [orderDone, setOrderDone] = useState(false);
 
-  const { data, isLoading, error } = trpc.quiz.getResult.useQuery(
+  // Try localStorage first (set by Quiz page after generate)
+  const cachedResult = (() => {
+    try {
+      const raw = localStorage.getItem(`quiz_result_${params.sessionId}`);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  const { data: serverData, isLoading, error } = trpc.quiz.getResult.useQuery(
     { sessionId: params.sessionId ?? "" },
-    { enabled: !!params.sessionId, retry: 3, retryDelay: 2000 }
+    { enabled: !!params.sessionId && !cachedResult, retry: 3, retryDelay: 2000 }
   );
 
-  if (isLoading) {
+  const data = cachedResult ?? serverData;
+
+  if (!cachedResult && isLoading) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 relative overflow-hidden">
         <div className="absolute inset-0">
@@ -217,7 +229,7 @@ export default function Result() {
     );
   }
 
-  if (error || !data) {
+  if (!cachedResult && (error || !data)) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 text-center">
         <div className="text-6xl mb-4">😅</div>
