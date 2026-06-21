@@ -30,7 +30,6 @@ const GET_USER_INFO_WITH_JWT_PATH = `/webdev.v1.WebDevAuthPublicService/GetUserI
 
 class OAuthService {
   constructor(private client: ReturnType<typeof axios.create>) {
-    // OAuth server is optional; without it, only JWT-based session verification works.
   }
 
   private decodeState(state: string): string {

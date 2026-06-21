@@ -25,14 +25,13 @@ import {
 
 const ADMIN_SESSION_KEY = "beast_admin_session";
 
+function sanitizeText(input: string): string {
+  return input.replace(/<[^>]*>/g, "").trim();
+}
+
 function isAdminSession(ctx: { req: { headers: Record<string, string | string[] | undefined> } }): boolean {
   const cookie = (ctx.req.headers.cookie as string) ?? "";
   return cookie.includes(`${ADMIN_SESSION_KEY}=authenticated`);
-}
-
-// Strip HTML tags to prevent stored XSS (CSC-011)
-function sanitizeText(input: string): string {
-  return input.replace(/<[^>]*>/g, "").trim();
 }
 
 async function generateCocktailWithClaude(
@@ -276,9 +275,6 @@ export const appRouter = router({
     login: publicProcedure
       .input(z.object({ username: z.string(), password: z.string() }))
       .mutation(({ input, ctx }) => {
-        if (!ENV.adminUsername || !ENV.adminPassword) {
-          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Admin credentials not configured" });
-        }
         if (input.username !== ENV.adminUsername || input.password !== ENV.adminPassword) {
           throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
         }
@@ -476,9 +472,10 @@ Rules:
       .mutation(async ({ input }) => {
         const session = await getQuizSession(input.sessionId);
         if (!session) throw new TRPCError({ code: "NOT_FOUND", message: "Session not found" });
-        if (session.completed) {
-          // Return cached result instead of re-generating (prevents cost abuse)
-          return { flavorProfile: session.flavorProfile, recipes: session.recipes, sessionId: session.sessionId };
+
+        // Return cached result if already generated (CSC-008 cost abuse prevention)
+        if (session.completed && session.recipes) {
+          return { flavorProfile: session.flavorProfile, recipes: session.recipes, sessionId: input.sessionId };
         }
 
         const availableIngredients = await getAvailableIngredients();

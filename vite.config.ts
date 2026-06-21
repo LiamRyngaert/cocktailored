@@ -18,7 +18,6 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
-    // Do not emit source maps in production (CSC-005)
     sourcemap: false,
   },
   server: {

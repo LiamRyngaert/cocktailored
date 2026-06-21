@@ -10,7 +10,7 @@ function getQueryParam(req: Request, key: string): string | undefined {
 }
 
 function isValidBase64(value: string): boolean {
-  return /^[A-Za-z0-9+/=]+$/.test(value) && value.length > 0 && value.length < 2048;
+  return /^[A-Za-z0-9+/=]+$/.test(value) && value.length > 0 && value.length < 4096;
 }
 
 export function registerOAuthRoutes(app: Express) {
@@ -23,15 +23,8 @@ export function registerOAuthRoutes(app: Express) {
       return;
     }
 
-    // Validate state format before token exchange (CSC-006)
     if (!isValidBase64(state)) {
       res.status(400).json({ error: "Invalid state parameter" });
-      return;
-    }
-
-    // Validate code format (should be non-empty alphanumeric-ish string)
-    if (code.length < 4 || code.length > 512) {
-      res.status(400).json({ error: "Invalid code parameter" });
       return;
     }
 
@@ -62,8 +55,7 @@ export function registerOAuthRoutes(app: Express) {
 
       res.redirect(302, "/");
     } catch (error) {
-      // Log internally only, never expose OAuth error details publicly (CSC-003)
-      console.error("[OAuth] Callback failed", error);
+      console.error("[OAuth] Callback failed:", error instanceof Error ? error.message : "unknown");
       res.status(400).json({ error: "OAuth callback failed" });
     }
   });

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f5a623"/>
+      <stop offset="40%" stop-color="#e8487a"/>
+      <stop offset="70%" stop-color="#b944cc"/>
+      <stop offset="100%" stop-color="#6a3fd8"/>
+    </linearGradient>
+  </defs>
+  <!-- Martini glass outline -->
+  <path d="M18 14 L50 58 L50 74 L34 74 L34 80 L66 80 L66 74 L50 74 L50 58 L82 14 Z"
+        fill="none" stroke="url(#g)" stroke-width="7" stroke-linejoin="round" stroke-linecap="round"/>
+  <!-- Filled triangle (drink) -->
+  <path d="M26 22 L50 55 L74 22 Z" fill="url(#g)" opacity="0.85"/>
+  <!-- Left straw curl -->
+  <path d="M22 14 Q14 8 18 14" fill="none" stroke="url(#g)" stroke-width="7" stroke-linecap="round"/>
+  <!-- Right straw curl -->
+  <path d="M78 14 Q86 8 82 14" fill="none" stroke="url(#g)" stroke-width="7" stroke-linecap="round"/>
+</svg>

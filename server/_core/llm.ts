@@ -1,11 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type {
   ImageBlockParam,
-  TextBlockParam,
   MessageParam,
+  TextBlockParam,
 } from "@anthropic-ai/sdk/resources/messages";
 
-export type Role = "system" | "user" | "assistant";
+export type Role = "system" | "user" | "assistant" | "tool" | "function";
 
 export type TextContent = {
   type: "text";
@@ -20,7 +20,15 @@ export type ImageContent = {
   };
 };
 
-export type MessageContent = string | TextContent | ImageContent;
+export type FileContent = {
+  type: "file_url";
+  file_url: {
+    url: string;
+    mime_type?: "audio/mpeg" | "audio/wav" | "application/pdf" | "audio/mp4" | "video/mp4";
+  };
+};
+
+export type MessageContent = string | TextContent | ImageContent | FileContent;
 
 export type Message = {
   role: Role;
@@ -29,20 +37,43 @@ export type Message = {
   tool_call_id?: string;
 };
 
+export type Tool = {
+  type: "function";
+  function: {
+    name: string;
+    description?: string;
+    parameters?: Record<string, unknown>;
+  };
+};
+
+export type ToolChoicePrimitive = "none" | "auto" | "required";
+export type ToolChoiceByName = { name: string };
+export type ToolChoiceExplicit = {
+  type: "function";
+  function: { name: string };
+};
+export type ToolChoice = ToolChoicePrimitive | ToolChoiceByName | ToolChoiceExplicit;
+
 export type InvokeParams = {
   messages: Message[];
-  model?: string;
+  tools?: Tool[];
+  toolChoice?: ToolChoice;
+  tool_choice?: ToolChoice;
   maxTokens?: number;
   max_tokens?: number;
-  response_format?: unknown;
-  responseFormat?: unknown;
-  outputSchema?: unknown;
-  output_schema?: unknown;
-  tools?: unknown;
-  toolChoice?: unknown;
-  tool_choice?: unknown;
-  thinking?: unknown;
-  reasoning?: unknown;
+  outputSchema?: OutputSchema;
+  output_schema?: OutputSchema;
+  responseFormat?: ResponseFormat;
+  response_format?: ResponseFormat;
+  model?: string;
+  thinking?: Record<string, unknown>;
+  reasoning?: Record<string, unknown>;
+};
+
+export type ToolCall = {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
 };
 
 export type InvokeResult = {
@@ -52,8 +83,9 @@ export type InvokeResult = {
   choices: Array<{
     index: number;
     message: {
-      role: string;
-      content: string;
+      role: Role;
+      content: string | Array<TextContent | ImageContent | FileContent>;
+      tool_calls?: ToolCall[];
     };
     finish_reason: string | null;
   }>;
@@ -64,70 +96,136 @@ export type InvokeResult = {
   };
 };
 
+export type JsonSchema = {
+  name: string;
+  schema: Record<string, unknown>;
+  strict?: boolean;
+};
+
+export type OutputSchema = JsonSchema;
+
+export type ResponseFormat =
+  | { type: "text" }
+  | { type: "json_object" }
+  | { type: "json_schema"; json_schema: JsonSchema };
+
+export type ModelInfo = {
+  id: string;
+  object: string;
+  created: number;
+  owned_by: string;
+};
+
 export type ModelsResponse = {
   object: string;
-  data: Array<{ id: string; object: string; created: number; owned_by: string }>;
+  data: ModelInfo[];
 };
 
 function getClient(): Anthropic {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured");
-  return new Anthropic({ apiKey });
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) throw new Error("ANTHROPIC_API_KEY is not configured");
+  return new Anthropic({ apiKey: key });
 }
 
-function parseDataUri(
-  dataUri: string
-): { mediaType: "image/jpeg" | "image/png" | "image/gif" | "image/webp"; data: string } {
-  const match = dataUri.match(/^data:(image\/\w+);base64,(.+)$/);
-  if (!match) throw new Error("Invalid image data URI");
-  const mediaType = match[1] as "image/jpeg" | "image/png" | "image/gif" | "image/webp";
-  return { mediaType, data: match[2] };
+function convertImageUrl(url: string): ImageBlockParam {
+  if (url.startsWith("data:")) {
+    const commaIdx = url.indexOf(",");
+    const header = url.slice(0, commaIdx);
+    const data = url.slice(commaIdx + 1);
+    const mediaType = header.split(";")[0].split(":")[1] as
+      | "image/jpeg"
+      | "image/png"
+      | "image/gif"
+      | "image/webp";
+    return { type: "image", source: { type: "base64", media_type: mediaType, data } };
+  }
+  return { type: "image", source: { type: "url", url } };
 }
 
 function convertContent(
-  content: MessageContent | MessageContent[]
+  content: MessageContent | MessageContent[],
 ): Array<TextBlockParam | ImageBlockParam> {
   const parts = Array.isArray(content) ? content : [content];
-  return parts.map((part): TextBlockParam | ImageBlockParam => {
-    if (typeof part === "string") return { type: "text", text: part };
-    if (part.type === "text") return { type: "text", text: part.text };
-    if (part.type === "image_url") {
-      const url = part.image_url.url;
-      if (url.startsWith("data:")) {
-        const { mediaType, data } = parseDataUri(url);
-        return { type: "image", source: { type: "base64", media_type: mediaType, data } };
-      }
-      return { type: "image", source: { type: "url", url } };
-    }
-    throw new Error(`Unsupported content type: ${(part as { type: string }).type}`);
+  return parts.flatMap((part): Array<TextBlockParam | ImageBlockParam> => {
+    if (typeof part === "string") return [{ type: "text", text: part }];
+    if (part.type === "text") return [{ type: "text", text: part.text }];
+    if (part.type === "image_url") return [convertImageUrl(part.image_url.url)];
+    return [{ type: "text", text: `[File: ${(part as FileContent).file_url.url}]` }];
   });
+}
+
+function extractSystemText(messages: Message[]): string {
+  return messages
+    .filter((m) => m.role === "system")
+    .map((m) => {
+      const c = m.content;
+      if (typeof c === "string") return c;
+      if (Array.isArray(c)) {
+        return c
+          .map((p) => (typeof p === "string" ? p : p.type === "text" ? p.text : ""))
+          .join("");
+      }
+      return "";
+    })
+    .join("\n");
 }
 
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   const client = getClient();
 
-  const systemParts = params.messages
-    .filter((m) => m.role === "system")
-    .map((m) => (typeof m.content === "string" ? m.content : ""))
-    .join("\n");
+  const {
+    messages,
+    model = "claude-sonnet-4-5",
+    maxTokens,
+    max_tokens,
+    responseFormat,
+    response_format,
+  } = params;
 
-  const messages: MessageParam[] = params.messages
+  let systemText = extractSystemText(messages);
+
+  const fmt = responseFormat ?? response_format;
+  if (fmt?.type === "json_schema" && fmt.json_schema) {
+    systemText +=
+      `\n\nRespond with valid JSON matching this schema:\n` +
+      JSON.stringify(fmt.json_schema.schema, null, 2) +
+      `\nReturn only the raw JSON object — no markdown fences.`;
+  } else if (fmt?.type === "json_object") {
+    systemText += "\n\nRespond with a valid JSON object only — no markdown fences.";
+  }
+
+  const anthropicMessages: MessageParam[] = messages
     .filter((m) => m.role !== "system")
-    .map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: convertContent(m.content),
-    }));
+    .map((m): MessageParam => {
+      if (m.role === "user") {
+        return { role: "user", content: convertContent(m.content) };
+      }
+      if (m.role === "assistant") {
+        const text =
+          typeof m.content === "string"
+            ? m.content
+            : Array.isArray(m.content)
+            ? m.content
+                .map((p) => (typeof p === "string" ? p : p.type === "text" ? p.text : ""))
+                .join("")
+            : "";
+        return { role: "assistant", content: text };
+      }
+      const text =
+        typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      return { role: "user", content: text };
+    });
 
   const response = await client.messages.create({
-    model: params.model ?? "claude-sonnet-4-5",
-    max_tokens: (params.maxTokens ?? params.max_tokens ?? 4096),
-    ...(systemParts ? { system: systemParts } : {}),
-    messages,
+    model,
+    system: systemText.trim() || undefined,
+    messages: anthropicMessages,
+    max_tokens: max_tokens ?? maxTokens ?? 4096,
   });
 
-  const text = response.content
-    .filter((b): b is Anthropic.Messages.TextBlock => b.type === "text")
-    .map((b) => b.text)
+  const textContent = response.content
+    .filter((c) => c.type === "text")
+    .map((c) => (c as { type: "text"; text: string }).text)
     .join("");
 
   return {
@@ -137,7 +235,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     choices: [
       {
         index: 0,
-        message: { role: "assistant", content: text },
+        message: { role: "assistant", content: textContent },
         finish_reason: response.stop_reason ?? null,
       },
     ],
@@ -150,11 +248,5 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
 }
 
 export async function listLLMModels(): Promise<ModelsResponse> {
-  return {
-    object: "list",
-    data: [
-      { id: "claude-sonnet-4-5", object: "model", created: 0, owned_by: "anthropic" },
-      { id: "claude-opus-4-8", object: "model", created: 0, owned_by: "anthropic" },
-    ],
-  };
+  return { object: "list", data: [] };
 }
