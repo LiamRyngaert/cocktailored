@@ -287,7 +287,7 @@ export const appRouter = router({
     login: publicProcedure
       .input(z.object({ username: z.string(), password: z.string() }))
       .mutation(({ input, ctx }) => {
-        if (input.username !== ENV.adminUsername || input.password !== ENV.adminPassword) {
+        if (input.username.trim() !== ENV.adminUsername.trim() || input.password !== ENV.adminPassword.trim()) {
           throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
         }
         ctx.res.cookie(ADMIN_SESSION_KEY, "authenticated", {
