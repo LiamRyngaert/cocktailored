@@ -119,6 +119,7 @@ Return a JSON object with this exact structure:
 
   const response = await invokeLLM({
     model: "claude-sonnet-4-5",
+    maxTokens: 8192,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
@@ -184,7 +185,18 @@ Return a JSON object with this exact structure:
 
   const content = response.choices[0]?.message?.content;
   if (!content) throw new Error("No response from Claude");
-  const parsed = typeof content === "string" ? JSON.parse(content) : content;
+  let parsed: ReturnType<typeof JSON.parse>;
+  if (typeof content === "string") {
+    const cleaned = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (e) {
+      console.error("[Claude] Raw response (first 500 chars):", cleaned.slice(0, 500));
+      throw new Error(`Claude returned invalid JSON: ${(e as Error).message}`);
+    }
+  } else {
+    parsed = content;
+  }
 
   // Enforce exactly 3 recipes
   if (!parsed.recipes || parsed.recipes.length < 1) {
