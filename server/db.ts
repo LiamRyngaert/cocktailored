@@ -168,7 +168,7 @@ export async function updateIngredientAvailability(id: number, available: boolea
 export async function addCustomIngredient(data: InsertIngredient) {
   const db = await getDb();
   if (!db) {
-    DEFAULT_INGREDIENTS.push({ ...data, id: DEFAULT_INGREDIENTS.length + 1, isCustom: true, createdAt: new Date() });
+    DEFAULT_INGREDIENTS.push({ ...data, available: data.available ?? true, id: DEFAULT_INGREDIENTS.length + 1, isCustom: true, createdAt: new Date() });
     return;
   }
   await db.insert(ingredients).values({ ...data, isCustom: true });
