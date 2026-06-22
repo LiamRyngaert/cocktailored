@@ -39,6 +39,12 @@ export const quizSessions = mysqlTable("quiz_sessions", {
   orderSubmitted: boolean("orderSubmitted").default(false).notNull(),
   webhookSent: boolean("webhookSent").default(false).notNull(),
   completed: boolean("completed").default(false).notNull(),
+  // GDPR consent audit trail — stored at time of order submission
+  consentComms: boolean("consentComms").default(false),
+  consentDataSharing: boolean("consentDataSharing").default(false),
+  consentFormVersion: varchar("consentFormVersion", { length: 16 }),
+  consentIp: varchar("consentIp", { length: 64 }),
+  consentTimestamp: timestamp("consentTimestamp"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

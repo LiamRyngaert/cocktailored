@@ -8,6 +8,7 @@ import Home from "./pages/Home";
 import Quiz from "./pages/Quiz";
 import Result from "./pages/Result";
 import Admin from "./pages/Admin";
+import Privacy from "./pages/Privacy";
 
 function Router() {
   return (
@@ -16,6 +17,7 @@ function Router() {
       <Route path="/quiz" component={Quiz} />
       <Route path="/result/:sessionId" component={Result} />
       <Route path="/admin" component={Admin} />
+      <Route path="/privacy" component={Privacy} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

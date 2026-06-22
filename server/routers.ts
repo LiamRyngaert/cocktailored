@@ -544,8 +544,11 @@ Rules:
         email: z.string().email().max(320),
         phone: z.string().min(6).max(32).optional(),
         selectedRecipeIndex: z.number().int().min(0).max(2).default(0),
+        consentComms: z.boolean(),
+        consentDataSharing: z.boolean(),
+        consentFormVersion: z.string().max(16),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
         const session = await getQuizSession(input.sessionId);
         if (!session || !session.completed) {
           throw new TRPCError({ code: "NOT_FOUND", message: "Session not found" });
@@ -554,12 +557,21 @@ Rules:
           return { success: true, alreadySubmitted: true };
         }
 
-        // Persist order details
+        const consentIp = (ctx.req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim()
+          ?? ctx.req.socket?.remoteAddress
+          ?? null;
+
+        // Persist order details + GDPR consent audit trail
         await updateQuizSession(input.sessionId, {
           orderEmail: input.email,
           orderPhone: input.phone,
           selectedRecipeIndex: input.selectedRecipeIndex,
           orderSubmitted: true,
+          consentComms: input.consentComms,
+          consentDataSharing: input.consentDataSharing,
+          consentFormVersion: input.consentFormVersion,
+          consentIp: consentIp ?? undefined,
+          consentTimestamp: new Date(),
         });
 
         // Fire order webhook

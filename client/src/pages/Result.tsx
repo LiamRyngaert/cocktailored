@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useParams, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
+
+const CONSENT_FORM_VERSION = "v1";
 import CocktailGlass3D from "@/components/CocktailGlass3D";
 import LiquidSplash3D from "@/components/LiquidSplash3D";
 import { toast } from "sonner";
@@ -104,6 +106,9 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, onSuccess }: {
       sessionId,
       email: email.trim(),
       selectedRecipeIndex,
+      consentComms: ageConfirmed,
+      consentDataSharing: termsAccepted,
+      consentFormVersion: CONSENT_FORM_VERSION,
     });
   };
 
@@ -173,7 +178,8 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, onSuccess }: {
       </button>
 
       <p className="text-white/30 text-xs text-center mt-2.5">
-        Your details are only used to prepare your drink.
+        Your details are only used to prepare your drink.{" "}
+        <a href="/privacy" className="underline hover:text-white/50 transition-colors">Privacy policy</a>
       </p>
     </div>
   );
