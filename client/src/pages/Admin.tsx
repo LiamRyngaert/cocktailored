@@ -99,7 +99,8 @@ function IngredientToggle({ available, onChange }: { available: boolean; onChang
 }
 
 function PhotoScanner({ onAdd }: { onAdd: (name: string, category: string) => void }) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
   const [scanning, setScanning] = useState(false);
   const [results, setResults] = useState<Array<{ name: string; category: string; confidence: string }> | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -107,12 +108,17 @@ function PhotoScanner({ onAdd }: { onAdd: (name: string, category: string) => vo
 
   const scanMutation = trpc.admin.scanIngredientPhoto.useMutation({
     onSuccess: (data) => {
+      if (!data.ingredients || data.ingredients.length === 0) {
+        toast.error("No ingredients found in photo. Try a clearer shot.");
+        setScanning(false);
+        return;
+      }
       setResults(data.ingredients);
       setSelected(new Set(data.ingredients.map((_, i) => i)));
       setScanning(false);
     },
-    onError: () => {
-      toast.error("Could not identify ingredients. Try a clearer photo.");
+    onError: (err) => {
+      toast.error(err.message ?? "Could not identify ingredients. Try a clearer photo.");
       setScanning(false);
     },
   });
@@ -123,8 +129,10 @@ function PhotoScanner({ onAdd }: { onAdd: (name: string, category: string) => vo
     setScanning(true);
     setResults(null);
     const reader = new FileReader();
+    reader.onerror = () => { toast.error("Could not read file."); setScanning(false); };
     reader.onload = (e) => {
       const dataUrl = e.target?.result as string;
+      if (!dataUrl) { toast.error("Could not read file."); setScanning(false); return; }
       scanMutation.mutate({ imageBase64: dataUrl });
     };
     reader.readAsDataURL(file);
@@ -150,6 +158,8 @@ function PhotoScanner({ onAdd }: { onAdd: (name: string, category: string) => vo
     setAdding(false);
   };
 
+  const reset = () => { setResults(null); setSelected(new Set()); setScanning(false); };
+
   const CONFIDENCE_COLORS: Record<string, string> = { high: "#10b981", medium: "#f59e0b", low: "#ef4444" };
 
   return (
@@ -159,37 +169,66 @@ function PhotoScanner({ onAdd }: { onAdd: (name: string, category: string) => vo
       </div>
 
       {!results && !scanning && (
-        <div
-          onClick={() => fileInputRef.current?.click()}
-          onDrop={handleDrop}
-          onDragOver={(e) => e.preventDefault()}
-          className="cursor-pointer transition-all duration-150 hover:border-white/30"
-          style={{
-            background: "rgba(255,255,255,0.03)",
-            border: "1.5px dashed rgba(255,255,255,0.18)",
-            borderRadius: "8px",
-            padding: "20px",
-            textAlign: "center",
-          }}
-        >
-          <div className="text-3xl mb-2">📷</div>
-          <div className="text-white/60 text-sm font-medium">Take a photo or upload an image</div>
-          <div className="text-white/30 text-xs mt-1">Photograph a bottle, a plant, or any bar ingredient. Claude will identify it.</div>
+        <>
+          <div
+            onDrop={handleDrop}
+            onDragOver={(e) => e.preventDefault()}
+            className="transition-all duration-150"
+            style={{
+              background: "rgba(255,255,255,0.03)",
+              border: "1.5px dashed rgba(255,255,255,0.18)",
+              borderRadius: "8px",
+              padding: "20px",
+              textAlign: "center",
+            }}
+          >
+            <div className="text-3xl mb-3">📷</div>
+            <div className="text-white/60 text-sm font-medium mb-4">Photograph a bottle or any bar ingredient</div>
+            <div className="flex gap-2 justify-center">
+              {/* Camera button — opens live camera on mobile */}
+              <button
+                onClick={() => cameraInputRef.current?.click()}
+                className="flex items-center gap-2 rounded-md px-4 py-2.5 font-semibold text-black text-sm transition-all active:scale-95"
+                style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}
+              >
+                📸 Camera
+              </button>
+              {/* Gallery / file picker */}
+              <button
+                onClick={() => galleryInputRef.current?.click()}
+                className="flex items-center gap-2 rounded-md px-4 py-2.5 font-semibold text-white/70 text-sm transition-all hover:text-white active:scale-95"
+                style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)" }}
+              >
+                🖼 Upload
+              </button>
+            </div>
+            <div className="text-white/25 text-xs mt-3">Drag & drop also works</div>
+          </div>
+          {/* Camera input — triggers native camera (no gallery) */}
           <input
-            ref={fileInputRef}
+            ref={cameraInputRef}
             type="file"
             accept="image/*"
             capture="environment"
             className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
           />
-        </div>
+          {/* Gallery input — opens file picker / photo library */}
+          <input
+            ref={galleryInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
+          />
+        </>
       )}
 
       {scanning && (
         <div className="text-center py-6" style={{ background: "rgba(168,85,247,0.08)", border: "1px solid rgba(168,85,247,0.25)", borderRadius: "8px" }}>
           <div className="text-3xl mb-2 animate-bounce">🔍</div>
           <div className="text-white/70 text-sm">Claude is identifying your ingredients...</div>
+          <button onClick={reset} className="text-white/30 hover:text-white/50 text-xs mt-3 transition-colors">Cancel</button>
         </div>
       )}
 
@@ -197,7 +236,7 @@ function PhotoScanner({ onAdd }: { onAdd: (name: string, category: string) => vo
         <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "8px", padding: "14px" }}>
           <div className="flex items-center justify-between mb-3">
             <div className="text-white text-sm font-semibold">Found {results.length} ingredient{results.length !== 1 ? "s" : ""}</div>
-            <button onClick={() => { setResults(null); setSelected(new Set()); }} className="text-white/30 hover:text-white/60 text-xs transition-colors">Clear</button>
+            <button onClick={reset} className="text-white/30 hover:text-white/60 text-xs transition-colors">Clear</button>
           </div>
           <div className="flex flex-col gap-1.5 mb-3">
             {results.map((ing, i) => (
@@ -211,7 +250,7 @@ function PhotoScanner({ onAdd }: { onAdd: (name: string, category: string) => vo
                 }}
               >
                 <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded flex items-center justify-center text-xs" style={{ background: selected.has(i) ? "#10b981" : "rgba(255,255,255,0.1)" }}>
+                  <div className="w-4 h-4 rounded flex items-center justify-center text-xs flex-shrink-0" style={{ background: selected.has(i) ? "#10b981" : "rgba(255,255,255,0.1)" }}>
                     {selected.has(i) ? "✓" : ""}
                   </div>
                   <span className="text-white text-sm">{ing.name}</span>
@@ -233,21 +272,13 @@ function PhotoScanner({ onAdd }: { onAdd: (name: string, category: string) => vo
               {adding ? "Adding..." : `Add ${selected.size} selected`}
             </button>
             <button
-              onClick={() => fileInputRef.current?.click()}
+              onClick={reset}
               className="rounded-md px-3 py-2.5 text-white/50 text-sm hover:text-white transition-colors"
               style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
             >
               New photo
             </button>
           </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
-          />
         </div>
       )}
     </div>

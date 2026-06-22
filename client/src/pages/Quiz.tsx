@@ -305,66 +305,82 @@ export default function Quiz() {
           ))}
         </div>
 
-        {/* Progress bar — "Almost there!" */}
+        {/* Progress bar */}
         <div className="relative z-10 px-4 pt-6 pb-2">
           <div className="flex items-center justify-between mb-2">
             <button onClick={() => setPhase("questions")} className="text-white/40 hover:text-white/70 text-sm transition-colors">
               ← Back
             </button>
-            <span className="text-sm font-semibold px-3 py-1 rounded-full" style={{ background: "rgba(16,185,129,0.2)", color: "#10b981" }}>Almost there!</span>
+            <span className="text-sm font-semibold px-3 py-1 rounded-full" style={{ background: "rgba(16,185,129,0.2)", color: "#10b981" }}>
+              Almost there!
+            </span>
           </div>
           <div className="w-full h-2 rounded-full" style={{ background: "rgba(255,255,255,0.1)" }}>
-            <div className="h-full rounded-full transition-all duration-500" style={{ width: "100%", background: "linear-gradient(90deg, #10b981, #22d3ee)" }} />
+            <div className="h-full rounded-full" style={{ width: "100%", background: "linear-gradient(90deg, #10b981, #22d3ee)" }} />
           </div>
         </div>
 
-        <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-4 py-8">
+        <div className="relative z-10 flex-1 flex flex-col items-center px-4 py-6 overflow-y-auto">
           <div style={{ width: "100%", maxWidth: "480px" }}>
-            <div className="rounded-3xl p-6 sm:p-8 mb-6 text-center"
-              style={{ background: "rgba(255,255,255,0.05)", border: "1.5px solid rgba(16,185,129,0.33)" }}>
-              <div className="text-5xl mb-4">🌿</div>
+            {/* Header */}
+            <div className="text-center mb-6">
+              <div className="text-5xl mb-3">🌿</div>
               <h2 className="font-display text-2xl sm:text-3xl font-bold text-white leading-tight mb-2">
                 Any allergies or ingredients to avoid?
               </h2>
               <p className="text-white/50 text-sm">We'll make sure none of these appear in your recipes.</p>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 mb-4">
+            {/* Options — single column like cocktailored.ai */}
+            <div className="flex flex-col gap-2 mb-4">
               {ALLERGY_OPTIONS.map((opt) => {
                 const isSelected = selectedAllergies.includes(opt.value);
                 return (
                   <button
                     key={opt.value}
                     onClick={() => toggleAllergy(opt.value)}
-                    className={`rounded-2xl px-4 py-3 text-left font-semibold text-white transition-all duration-200 active:scale-97 flex items-center gap-2 ${opt.value === "none" ? "col-span-2" : ""}`}
+                    className="w-full rounded-2xl px-4 py-3.5 text-left font-semibold text-white transition-all duration-150 active:scale-98 flex items-center gap-3"
                     style={{
-                      background: isSelected ? "rgba(16,185,129,0.22)" : "rgba(255,255,255,0.06)",
+                      background: isSelected ? "rgba(16,185,129,0.18)" : "rgba(255,255,255,0.06)",
                       border: isSelected ? "2px solid #10b981" : "1.5px solid rgba(255,255,255,0.12)",
                     }}
                   >
+                    {/* Checkbox on the left */}
+                    <div
+                      className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 transition-all duration-150"
+                      style={{
+                        background: isSelected ? "#10b981" : "rgba(255,255,255,0.1)",
+                        border: isSelected ? "none" : "1.5px solid rgba(255,255,255,0.25)",
+                      }}
+                    >
+                      {isSelected && <span className="text-white text-xs font-bold">✓</span>}
+                    </div>
+                    {/* Label */}
+                    <span className="text-sm flex-1">{opt.label}</span>
+                    {/* Emoji on the right */}
                     <span className="text-lg">{opt.emoji}</span>
-                    <span className="text-sm">{opt.label}</span>
-                    {isSelected && <span className="ml-auto text-green-400 text-sm">✓</span>}
                   </button>
                 );
               })}
             </div>
 
+            {/* Free-text other */}
             <input
               type="text"
               value={allergyOther}
               onChange={(e) => setAllergyOther(e.target.value)}
               placeholder="Other allergy or ingredient to avoid..."
-              className="w-full rounded-xl px-4 py-3 text-sm text-white placeholder-white/30 outline-none mb-4"
+              className="w-full rounded-xl px-4 py-3 text-sm text-white placeholder-white/30 outline-none mb-1"
               style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)" }}
             />
 
-            {allergyError && <p className="text-red-400 text-xs mb-3">{allergyError}</p>}
+            {allergyError && <p className="text-red-400 text-xs mt-1 mb-2">{allergyError}</p>}
+            {!allergyError && <p className="text-white/30 text-xs mt-1 mb-4">Select at least one option above</p>}
 
             <button
               onClick={() => handleAllergySubmit(answers)}
-              className="w-full rounded-xl py-4 text-lg font-bold text-white transition-all duration-200 active:scale-95"
-              style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)", boxShadow: "0 0 32px rgba(16,185,129,0.4)" }}
+              className="w-full rounded-xl py-4 text-lg font-bold text-white transition-all duration-200 active:scale-95 mt-2"
+              style={{ background: "linear-gradient(135deg, #0d9488, #10b981)", boxShadow: "0 0 32px rgba(16,185,129,0.4)" }}
             >
               Brew My Cocktails →
             </button>

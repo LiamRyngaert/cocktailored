@@ -376,9 +376,10 @@ export const appRouter = router({
           messages: [
             {
               role: "system",
-              content: `You are a professional bartender and ingredient identifier. 
+              content: `You are a professional bartender and ingredient identifier.
 Your job is to look at photos of bar ingredients and identify exactly what they are.
-Return ONLY a JSON array of identified ingredients. Each item must have:
+Return a JSON object with a single key "ingredients" containing an array of identified ingredients.
+Each item in the array must have:
 - name: the specific ingredient name (e.g. "Hendricks Gin", "Fresh Mint", "Angostura Bitters", "Lime Juice")
 - category: one of [spirits, liqueurs, mixers, juices, syrups, bitters, garnishes, other]
 - confidence: "high", "medium", or "low"
@@ -388,7 +389,7 @@ Rules:
 - For fresh produce (mint, lime, lemon, etc.), use "garnishes" as category.
 - If you see multiple ingredients in one photo, list all of them.
 - If the image is unclear, still try your best and mark confidence as "low".
-- NEVER return anything other than the JSON array.`,
+- Return ONLY the JSON object — no markdown, no extra text.`,
             },
             {
               role: "user",
