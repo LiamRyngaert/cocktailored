@@ -148,7 +148,7 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, onSuccess }: {
             onChange={(e) => { setAgeConfirmed(e.target.checked); setErrors((prev) => ({ ...prev, age: undefined })); }}
             className="mt-0.5 w-4 h-4 accent-orange-400 flex-shrink-0"
           />
-          <span className="text-white/70 text-sm">I confirm that I am 18 years of age or older.</span>
+          <span className="text-white/70 text-sm">I agree to receive communications from this company.</span>
         </label>
         {errors.age && <p className="text-red-400 text-xs ml-7">{errors.age}</p>}
         <label className="flex items-start gap-3 cursor-pointer select-none">
@@ -158,7 +158,7 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, onSuccess }: {
             onChange={(e) => { setTermsAccepted(e.target.checked); setErrors((prev) => ({ ...prev, terms: undefined })); }}
             className="mt-0.5 w-4 h-4 accent-orange-400 flex-shrink-0"
           />
-          <span className="text-white/70 text-sm">I agree to my cocktail being prepared and served at the bar.</span>
+          <span className="text-white/70 text-sm">I agree that my data may be shared with relevant third-party partners for marketing purposes.</span>
         </label>
         {errors.terms && <p className="text-red-400 text-xs ml-7">{errors.terms}</p>}
       </div>

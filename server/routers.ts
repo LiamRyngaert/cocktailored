@@ -247,7 +247,7 @@ async function fireWebhook(
     location: "Indonesia",
     flavorProfile,
     recipes,
-    quizAnswers: answers,
+    quizAnswers: null,
     whatsappNumber: "+32492532305",
   });
 
@@ -500,7 +500,7 @@ Rules:
         await createQuizSession({
           sessionId,
           guestName,
-          answers: input.answers,
+          answers: [],
           completed: false,
           webhookSent: false,
         });
