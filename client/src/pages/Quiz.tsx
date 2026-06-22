@@ -254,7 +254,7 @@ export default function Quiz() {
         <div className="absolute inset-0 pointer-events-none overflow-hidden">
           {["#ff6b35", "#a855f7", "#22d3ee"].map((c, i) => (
             <div key={i} className="absolute liquid-blob"
-              style={{ width: 200 + i * 80, height: 200 + i * 80, background: c, opacity: 0.12,
+              style={{ width: 280 + i * 100, height: 280 + i * 100, background: c, opacity: 0.45,
                 top: `${20 + i * 25}%`, left: i % 2 === 0 ? "-5%" : "75%", animationDelay: `${i * 2}s` }} />
           ))}
         </div>
@@ -300,7 +300,7 @@ export default function Quiz() {
         <div className="absolute inset-0 pointer-events-none overflow-hidden">
           {["#10b981", "#22d3ee", "#a855f7"].map((c, i) => (
             <div key={i} className="absolute liquid-blob"
-              style={{ width: 200 + i * 80, height: 200 + i * 80, background: c, opacity: 0.1,
+              style={{ width: 280 + i * 100, height: 280 + i * 100, background: c, opacity: 0.35,
                 top: `${20 + i * 25}%`, left: i % 2 === 0 ? "-5%" : "75%", animationDelay: `${i * 2}s` }} />
           ))}
         </div>
@@ -414,9 +414,9 @@ export default function Quiz() {
       {/* Background */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
         <div className="absolute liquid-blob"
-          style={{ width: 300, height: 300, background: question.splashColor, opacity: 0.08, top: "10%", right: "-5%", transition: "background 0.5s" }} />
+          style={{ width: 400, height: 400, background: question.splashColor, opacity: 0.35, top: "5%", right: "-10%", transition: "background 0.5s" }} />
         <div className="absolute liquid-blob"
-          style={{ width: 250, height: 250, background: question.secondaryColor, opacity: 0.08, bottom: "10%", left: "-5%", animationDelay: "3s", transition: "background 0.5s" }} />
+          style={{ width: 350, height: 350, background: question.secondaryColor, opacity: 0.3, bottom: "5%", left: "-10%", animationDelay: "3s", transition: "background 0.5s" }} />
       </div>
 
       {/* Progress bar */}

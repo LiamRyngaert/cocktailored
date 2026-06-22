@@ -284,9 +284,9 @@ export default function Result() {
       {/* Background blobs */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 0 }}>
         <div className="absolute liquid-blob"
-          style={{ width: 400, height: 400, background: recipe.colorHex, opacity: 0.07, top: "5%", right: "-10%", transition: "background 0.8s" }} />
+          style={{ width: 500, height: 500, background: recipe.colorHex, opacity: 0.3, top: "5%", right: "-15%", transition: "background 0.8s" }} />
         <div className="absolute liquid-blob"
-          style={{ width: 300, height: 300, background: "#a855f7", opacity: 0.07, bottom: "10%", left: "-5%", animationDelay: "3s" }} />
+          style={{ width: 400, height: 400, background: "#a855f7", opacity: 0.25, bottom: "10%", left: "-10%", animationDelay: "3s" }} />
       </div>
 
       <div className="relative z-10">

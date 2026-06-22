@@ -38,18 +38,18 @@ function FullPageBlobCanvas({ pageHeight }: { pageHeight: number }) {
     // Blobs spread across the full vertical extent of the page
     // y values go from +12 (top) down to -34 (bottom of long page)
     const blobDefs = [
-      { color: "#ff6b35", r: 1.5, x: -5,  y:  12, z: -2 },
-      { color: "#a855f7", r: 1.9, x:  6,  y:   7, z: -3 },
-      { color: "#22d3ee", r: 1.2, x: -3,  y:   2, z: -1 },
-      { color: "#f59e0b", r: 1.6, x:  5,  y:  -3, z: -2 },
-      { color: "#ec4899", r: 1.3, x: -7,  y:  -8, z: -1 },
-      { color: "#10b981", r: 1.7, x:  3,  y: -13, z: -3 },
-      { color: "#6366f1", r: 1.1, x: -2,  y: -18, z: -2 },
-      { color: "#ff6b35", r: 1.4, x:  7,  y: -23, z: -1 },
-      { color: "#a855f7", r: 1.8, x: -5,  y: -28, z: -3 },
-      { color: "#22d3ee", r: 1.0, x:  2,  y: -33, z: -2 },
-      { color: "#ec4899", r: 1.5, x: -8,  y: -38, z: -1 },
-      { color: "#f59e0b", r: 1.2, x:  6,  y: -43, z: -2 },
+      { color: "#ff6b35", r: 2.2, x: -5,  y:  12, z: -2 },
+      { color: "#a855f7", r: 2.8, x:  6,  y:   7, z: -3 },
+      { color: "#22d3ee", r: 1.8, x: -3,  y:   2, z: -1 },
+      { color: "#f59e0b", r: 2.4, x:  5,  y:  -3, z: -2 },
+      { color: "#ec4899", r: 2.0, x: -7,  y:  -8, z: -1 },
+      { color: "#10b981", r: 2.5, x:  3,  y: -13, z: -3 },
+      { color: "#6366f1", r: 1.7, x: -2,  y: -18, z: -2 },
+      { color: "#ff6b35", r: 2.1, x:  7,  y: -23, z: -1 },
+      { color: "#a855f7", r: 2.6, x: -5,  y: -28, z: -3 },
+      { color: "#22d3ee", r: 1.6, x:  2,  y: -33, z: -2 },
+      { color: "#ec4899", r: 2.2, x: -8,  y: -38, z: -1 },
+      { color: "#f59e0b", r: 1.9, x:  6,  y: -43, z: -2 },
     ];
 
     const blobs: { mesh: THREE.Mesh; ox: number; oy: number; phase: number; speed: number }[] = [];
@@ -59,10 +59,11 @@ function FullPageBlobCanvas({ pageHeight }: { pageHeight: number }) {
       const mat = new THREE.MeshPhysicalMaterial({
         color: new THREE.Color(def.color),
         transparent: true,
-        opacity: 0.5,
-        roughness: 0.05,
-        metalness: 0.05,
-        transmission: 0.4,
+        opacity: 0.85,
+        roughness: 0.0,
+        metalness: 0.1,
+        emissive: new THREE.Color(def.color),
+        emissiveIntensity: 0.35,
       });
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(def.x, def.y, def.z);
@@ -76,13 +77,16 @@ function FullPageBlobCanvas({ pageHeight }: { pageHeight: number }) {
       });
     }
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-    const pl1 = new THREE.PointLight(0xff6b35, 3, 50);
+    scene.add(new THREE.AmbientLight(0xffffff, 1.8));
+    const pl1 = new THREE.PointLight(0xff6b35, 6, 60);
     pl1.position.set(4, 4, 8);
     scene.add(pl1);
-    const pl2 = new THREE.PointLight(0xa855f7, 2, 50);
+    const pl2 = new THREE.PointLight(0xa855f7, 4, 60);
     pl2.position.set(-4, -10, 8);
     scene.add(pl2);
+    const pl3 = new THREE.PointLight(0x22d3ee, 3, 60);
+    pl3.position.set(0, 0, 10);
+    scene.add(pl3);
 
     let animating = true;
     function animate() {
@@ -177,7 +181,7 @@ export default function Home() {
       {/* Subtle dark veil so text stays readable without killing the blobs */}
       <div
         className="absolute top-0 left-0 w-full pointer-events-none"
-        style={{ height: pageHeight, background: "rgba(8,8,20,0.25)", zIndex: 1 }}
+        style={{ height: pageHeight, background: "rgba(8,8,20,0.12)", zIndex: 1 }}
       />
 
       {/* All content sits above the blob canvas */}
