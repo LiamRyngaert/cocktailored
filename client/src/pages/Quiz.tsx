@@ -345,20 +345,17 @@ export default function Quiz() {
                       border: isSelected ? "2px solid #10b981" : "1.5px solid rgba(255,255,255,0.12)",
                     }}
                   >
-                    {/* Checkbox on the left */}
+                    {/* Icon on the LEFT — emoji for food items, ✓ for "none" */}
                     <div
-                      className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 transition-all duration-150"
+                      className="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 text-lg transition-all duration-150"
                       style={{
-                        background: isSelected ? "#10b981" : "rgba(255,255,255,0.1)",
-                        border: isSelected ? "none" : "1.5px solid rgba(255,255,255,0.25)",
+                        background: isSelected ? "rgba(16,185,129,0.35)" : "rgba(255,255,255,0.08)",
                       }}
                     >
-                      {isSelected && <span className="text-white text-xs font-bold">✓</span>}
+                      <span>{opt.emoji}</span>
                     </div>
                     {/* Label */}
                     <span className="text-sm flex-1">{opt.label}</span>
-                    {/* Emoji on the right */}
-                    <span className="text-lg">{opt.emoji}</span>
                   </button>
                 );
               })}
