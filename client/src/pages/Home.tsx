@@ -8,7 +8,10 @@ const FALLBACK_REVIEWS = [
   { id: 2, name: "Emma V.", text: "The quiz took 2 minutes and my cocktail was genuinely perfect. The bartender was impressed by the recipe too.", rating: 5, color: "#a855f7" },
   { id: 3, name: "Lena K.", text: "Got a lavender gin fizz. I am not a gin person but this converted me completely.", rating: 5, color: "#22d3ee" },
   { id: 4, name: "Nathalie B.", text: "My friends and I all did it together and got completely different cocktails. All of them were spot on.", rating: 5, color: "#f59e0b" },
-  { id: 5, name: "Yasmine R.", text: "Really fun experience. Will come back for more.", rating: 4, color: "#ec4899" },
+  { id: 5, name: "Yasmine R.", text: "Really fun experience. The cocktail matched my vibe perfectly. Will do it every time I come here.", rating: 4, color: "#ec4899" },
+  { id: 6, name: "Amelie D.", text: "I always order the same thing. This made me try something new and it was the best drink I have had in years.", rating: 5, color: "#10b981" },
+  { id: 7, name: "Thomas W.", text: "Skeptical at first but the coconut rum smash it gave me was incredible. Highly recommend.", rating: 5, color: "#6366f1" },
+  { id: 8, name: "Julien P.", text: "Got a smoky mezcal sour. Exactly my personality apparently. Loved it.", rating: 4, color: "#f97316" },
 ];
 
 /**
