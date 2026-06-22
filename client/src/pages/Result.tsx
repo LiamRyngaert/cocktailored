@@ -73,8 +73,9 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, onSuccess }: {
   onSuccess: () => void;
 }) {
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [errors, setErrors] = useState<{ email?: string; phone?: string }>({});
+  const [ageConfirmed, setAgeConfirmed] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [errors, setErrors] = useState<{ email?: string; age?: string; terms?: string }>({});
 
   const submitMutation = trpc.quiz.submitOrder.useMutation({
     onSuccess: () => {
@@ -87,13 +88,12 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, onSuccess }: {
   });
 
   const validate = () => {
-    const e: { email?: string; phone?: string } = {};
+    const e: { email?: string; age?: string; terms?: string } = {};
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       e.email = "Enter a valid email address.";
     }
-    if (!phone.trim() || phone.trim().length < 6) {
-      e.phone = "Enter a valid phone number.";
-    }
+    if (!ageConfirmed) e.age = "You must confirm you are 18 or older.";
+    if (!termsAccepted) e.terms = "You must accept the terms to continue.";
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -103,7 +103,6 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, onSuccess }: {
     submitMutation.mutate({
       sessionId,
       email: email.trim(),
-      phone: phone.trim(),
       selectedRecipeIndex,
     });
   };
@@ -126,33 +125,42 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, onSuccess }: {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 mb-4">
-        <div>
-          <label className="block text-white/50 text-xs uppercase tracking-wider mb-1">
-            {guestName ? `${guestName}'s email` : "Your email"}
-          </label>
+      <div className="mb-4">
+        <label className="block text-white/50 text-xs uppercase tracking-wider mb-1">
+          {guestName ? `${guestName}'s email` : "Your email"}
+        </label>
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => { setEmail(e.target.value); setErrors((prev) => ({ ...prev, email: undefined })); }}
+          placeholder="you@example.com"
+          className="w-full rounded-md px-3 py-3 text-white placeholder-white/25 outline-none text-sm"
+          style={{ background: "rgba(255,255,255,0.07)", border: errors.email ? "1.5px solid #ef4444" : "1px solid rgba(255,255,255,0.12)" }}
+        />
+        {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email}</p>}
+      </div>
+
+      <div className="flex flex-col gap-2 mb-4">
+        <label className="flex items-start gap-3 cursor-pointer select-none">
           <input
-            type="email"
-            value={email}
-            onChange={(e) => { setEmail(e.target.value); setErrors((prev) => ({ ...prev, email: undefined })); }}
-            placeholder="you@example.com"
-            className="w-full rounded-md px-3 py-3 text-white placeholder-white/25 outline-none text-sm"
-            style={{ background: "rgba(255,255,255,0.07)", border: errors.email ? "1.5px solid #ef4444" : "1px solid rgba(255,255,255,0.12)" }}
+            type="checkbox"
+            checked={ageConfirmed}
+            onChange={(e) => { setAgeConfirmed(e.target.checked); setErrors((prev) => ({ ...prev, age: undefined })); }}
+            className="mt-0.5 w-4 h-4 accent-orange-400 flex-shrink-0"
           />
-          {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email}</p>}
-        </div>
-        <div>
-          <label className="block text-white/50 text-xs uppercase tracking-wider mb-1">Phone number</label>
+          <span className="text-white/70 text-sm">I confirm that I am 18 years of age or older.</span>
+        </label>
+        {errors.age && <p className="text-red-400 text-xs ml-7">{errors.age}</p>}
+        <label className="flex items-start gap-3 cursor-pointer select-none">
           <input
-            type="tel"
-            value={phone}
-            onChange={(e) => { setPhone(e.target.value); setErrors((prev) => ({ ...prev, phone: undefined })); }}
-            placeholder="+32 ..."
-            className="w-full rounded-md px-3 py-3 text-white placeholder-white/25 outline-none text-sm"
-            style={{ background: "rgba(255,255,255,0.07)", border: errors.phone ? "1.5px solid #ef4444" : "1px solid rgba(255,255,255,0.12)" }}
+            type="checkbox"
+            checked={termsAccepted}
+            onChange={(e) => { setTermsAccepted(e.target.checked); setErrors((prev) => ({ ...prev, terms: undefined })); }}
+            className="mt-0.5 w-4 h-4 accent-orange-400 flex-shrink-0"
           />
-          {errors.phone && <p className="text-red-400 text-xs mt-1">{errors.phone}</p>}
-        </div>
+          <span className="text-white/70 text-sm">I agree to my cocktail being prepared and served at the bar.</span>
+        </label>
+        {errors.terms && <p className="text-red-400 text-xs ml-7">{errors.terms}</p>}
       </div>
 
       <button

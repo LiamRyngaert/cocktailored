@@ -3,17 +3,13 @@ import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import * as THREE from "three";
 
-// Real people photo URLs (Unsplash — more women than men)
-const REVIEW_PHOTOS: Record<string, string> = {
-  "Maya S.": "https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?w=80&h=80&fit=crop&crop=face",
-  "Lena V.": "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=80&h=80&fit=crop&crop=face",
-  "Sophie K.": "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=80&h=80&fit=crop&crop=face",
-  "Nadia R.": "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=80&h=80&fit=crop&crop=face",
-  "Zara M.": "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?w=80&h=80&fit=crop&crop=face",
-  "Tomas B.": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=80&h=80&fit=crop&crop=face",
-  "Isla P.": "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=80&h=80&fit=crop&crop=face",
-  "Roos D.": "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=80&h=80&fit=crop&crop=face",
-};
+const FALLBACK_REVIEWS = [
+  { id: 1, name: "Sofia M.", text: "I got a spicy passion fruit margarita and it was exactly what I needed. Never would have ordered that myself!", rating: 5, color: "#ff6b35" },
+  { id: 2, name: "Emma V.", text: "The quiz took 2 minutes and my cocktail was genuinely perfect. The bartender was impressed by the recipe too.", rating: 5, color: "#a855f7" },
+  { id: 3, name: "Lena K.", text: "Got a lavender gin fizz. I am not a gin person but this converted me completely.", rating: 5, color: "#22d3ee" },
+  { id: 4, name: "Nathalie B.", text: "My friends and I all did it together and got completely different cocktails. All of them were spot on.", rating: 5, color: "#f59e0b" },
+  { id: 5, name: "Yasmine R.", text: "Really fun experience. Will come back for more.", rating: 4, color: "#ec4899" },
+];
 
 /**
  * Full-page Three.js blob canvas that covers the ENTIRE document height.
@@ -122,35 +118,21 @@ function FullPageBlobCanvas({ pageHeight }: { pageHeight: number }) {
   );
 }
 
-function ReviewCard({ review }: { review: { name: string; text: string; rating: number; color: string } }) {
-  const photoUrl = REVIEW_PHOTOS[review.name];
+function ReviewCard({ review }: { review: { name: string; text: string; rating: number; color?: string } }) {
+  const color = review.color ?? "#ff6b35";
   return (
     <div
       className="p-5 flex flex-col gap-3 flex-shrink-0 w-72 sm:w-80"
       style={{
-        background: `linear-gradient(135deg, ${review.color}18, rgba(255,255,255,0.025))`,
-        border: `1.5px solid ${review.color}30`,
+        background: `linear-gradient(135deg, ${color}18, rgba(255,255,255,0.025))`,
+        border: `1.5px solid ${color}30`,
         borderRadius: "8px",
       }}
     >
       <div className="flex items-center gap-3">
-        {photoUrl ? (
-          <img
-            src={photoUrl}
-            alt={review.name}
-            className="w-11 h-11 object-cover flex-shrink-0"
-            style={{ borderRadius: "50%", border: `2px solid ${review.color}50` }}
-            onError={(e) => {
-              const t = e.currentTarget as HTMLImageElement;
-              t.style.display = "none";
-              const fb = t.nextElementSibling as HTMLElement;
-              if (fb) fb.style.display = "flex";
-            }}
-          />
-        ) : null}
         <div
-          className="w-11 h-11 items-center justify-center text-base font-bold flex-shrink-0"
-          style={{ background: review.color, borderRadius: "50%", display: photoUrl ? "none" : "flex" }}
+          className="w-11 h-11 flex items-center justify-center text-base font-bold flex-shrink-0 text-white"
+          style={{ background: color, borderRadius: "50%" }}
         >
           {review.name[0]}
         </div>
@@ -195,7 +177,7 @@ export default function Home() {
       {/* Subtle dark veil so text stays readable without killing the blobs */}
       <div
         className="absolute top-0 left-0 w-full pointer-events-none"
-        style={{ height: pageHeight, background: "rgba(8,8,20,0.52)", zIndex: 1 }}
+        style={{ height: pageHeight, background: "rgba(8,8,20,0.25)", zIndex: 1 }}
       />
 
       {/* All content sits above the blob canvas */}
@@ -275,8 +257,8 @@ export default function Home() {
           </div>
           <div className="overflow-x-auto pb-4 px-5">
             <div className="flex gap-4 w-max">
-              {(reviews ?? []).map((review) => (
-                <ReviewCard key={review.id} review={review} />
+              {(reviews && reviews.length > 0 ? reviews : FALLBACK_REVIEWS).map((review) => (
+                <ReviewCard key={review.id} review={review as { name: string; text: string; rating: number; color: string }} />
               ))}
             </div>
           </div>

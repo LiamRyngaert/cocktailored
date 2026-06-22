@@ -36,7 +36,8 @@ function isAdminSession(ctx: { req: { headers: Record<string, string | string[] 
 
 async function generateCocktailWithClaude(
   answers: Array<{ questionId: number; question: string; answer: string }>,
-  availableIngredients: Array<{ name: string; category: string }>
+  availableIngredients: Array<{ name: string; category: string }>,
+  allergies?: string[]
 ): Promise<{
   flavorProfile: Record<string, unknown>;
   recipes: Array<{
@@ -81,7 +82,7 @@ CRITICAL RULES:
 - Do not use em dashes (use commas or periods instead). Do not use the word "AI" or "algorithm" anywhere.
 - Write as if you are a wise, warm bartender who truly knows this person.
 
-AVAILABLE INGREDIENTS: ${ingredientList}`;
+AVAILABLE INGREDIENTS: ${ingredientList}${allergies && allergies.length > 0 && !allergies.includes("none") ? `\n\nALLERGY RESTRICTIONS — MUST AVOID: ${allergies.join(", ")}. Do NOT include any ingredient related to these restrictions in any of the 3 recipes.` : ""}`;
 
   const userPrompt = `Based on these quiz answers, create 3 personalised cocktail recipes for this person:
 
@@ -489,6 +490,7 @@ Rules:
           question: z.string(),
           answer: z.string(),
         })).min(1).max(20),
+        allergies: z.array(z.string()).optional(),
       }))
       .mutation(async ({ input }) => {
         const sessionId = nanoid(16);
@@ -504,7 +506,7 @@ Rules:
         });
 
         const availableIngredients = await getAvailableIngredients();
-        const result = await generateCocktailWithClaude(input.answers, availableIngredients);
+        const result = await generateCocktailWithClaude(input.answers, availableIngredients, input.allergies);
 
         const webhookUrl = await getAdminSetting("webhook_url");
         let webhookSent = false;
@@ -540,7 +542,7 @@ Rules:
       .input(z.object({
         sessionId: z.string().min(8).max(64),
         email: z.string().email().max(320),
-        phone: z.string().min(6).max(32),
+        phone: z.string().min(6).max(32).optional(),
         selectedRecipeIndex: z.number().int().min(0).max(2).default(0),
       }))
       .mutation(async ({ input }) => {
