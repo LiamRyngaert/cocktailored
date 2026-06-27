@@ -588,39 +588,17 @@ function SettingsTab() {
     onSuccess: () => { refetch(); toast.success("Saved!"); },
   });
 
-  const [webhookUrl, setWebhookUrl] = useState("");
   const [whatsapp, setWhatsapp] = useState("");
 
   useEffect(() => {
     if (settings) {
-      const wh = settings.find((s) => s.key === "webhook_url");
       const wa = settings.find((s) => s.key === "whatsapp_number");
-      if (wh?.value) setWebhookUrl(wh.value);
       if (wa?.value) setWhatsapp(wa.value);
     }
   }, [settings]);
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
-        <div className="text-white font-semibold mb-1">Webhook URL</div>
-        <p className="text-white/40 text-xs mb-3">POST request with full recipe and answers on every quiz completion.</p>
-        <textarea
-          value={webhookUrl}
-          onChange={(e) => setWebhookUrl(e.target.value)}
-          rows={3}
-          className="w-full rounded-md px-3 py-2.5 text-white placeholder-white/30 outline-none mb-3 text-sm resize-none"
-          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
-          placeholder="https://..."
-        />
-        <button onClick={() => updateMutation.mutate({ key: "webhook_url", value: webhookUrl })}
-          disabled={updateMutation.isPending}
-          className="rounded-md px-4 py-2 font-bold text-black text-sm disabled:opacity-50"
-          style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}>
-          {updateMutation.isPending ? "Saving..." : "Save Webhook"}
-        </button>
-      </div>
-
       <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
         <div className="text-white font-semibold mb-1">WhatsApp Number</div>
         <p className="text-white/40 text-xs mb-3">Bartender's number for order notifications.</p>

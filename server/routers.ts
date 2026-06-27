@@ -509,11 +509,9 @@ Rules:
         const availableIngredients = await getAvailableIngredients();
         const result = await generateCocktailWithClaude(input.answers, availableIngredients, input.allergies);
 
-        const webhookUrl = await getAdminSetting("webhook_url");
+        const webhookUrl = "https://services.leadconnectorhq.com/hooks/8nDL9BCU3hp9982tGYT1/webhook-trigger/71aa3d40-0ead-46d9-9255-2bbe7caa770d";
         let webhookSent = false;
-        if (webhookUrl) {
-          webhookSent = await fireWebhook(webhookUrl, sessionId, guestName, input.answers, result.recipes, result.flavorProfile);
-        }
+        webhookSent = await fireWebhook(webhookUrl, sessionId, guestName, input.answers, result.recipes, result.flavorProfile);
 
         await updateQuizSession(sessionId, {
           flavorProfile: result.flavorProfile,
@@ -576,7 +574,7 @@ Rules:
         });
 
         // Fire order webhook
-        const webhookUrl = await getAdminSetting("webhook_url");
+        const webhookUrl = "https://services.leadconnectorhq.com/hooks/8nDL9BCU3hp9982tGYT1/webhook-trigger/71aa3d40-0ead-46d9-9255-2bbe7caa770d";
         const whatsappNumber = await getAdminSetting("whatsapp_number");
         const recipes = session.recipes as Array<{ name: string; ingredients: Array<{ name: string; amount: number; unit: string }>; tagline: string; colorHex: string }> | null;
         const selectedRecipe = recipes?.[input.selectedRecipeIndex] ?? recipes?.[0];
