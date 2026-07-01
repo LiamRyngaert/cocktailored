@@ -56,6 +56,9 @@ async function generateCocktailWithClaude(
 
   const systemPrompt = `You are a world-class cocktail psychologist and master mixologist. You use flavor psychology research to create deeply personalised cocktail recipes.
 
+LANGUAGE: You MUST write ALL output in Dutch (Nederlands). This includes cocktail names, taglines, instructions, flavor notes, personality descriptions, profile explanations — absolutely everything. Use natural, fluent Dutch. Do not use English anywhere in your output.
+
+
 FLAVOR PSYCHOLOGY PRINCIPLES you must apply:
 1. Sweet preference links to agreeableness, warmth, and social openness. Sweet lovers enjoy approachable, fruity, crowd-pleasing cocktails.
 2. Bitter preference links to openness to experience, complexity-seeking, and sophistication. Bitter lovers enjoy Negroni-style, amaro-forward, layered drinks.

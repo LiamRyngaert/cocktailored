@@ -493,22 +493,88 @@ type AdminRecipe = {
 
 function OrdersTab() {
   const { data: sessions } = trpc.admin.getSessions.useQuery();
+  // Map<id, servedAt timestamp>
+  const [servedMap, setServedMap] = useState<Map<number, number>>(new Map());
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [servedIds, setServedIds] = useState<Set<number>>(new Set());
   const [activeRecipeIdx, setActiveRecipeIdx] = useState(0);
   const [search, setSearch] = useState("");
+  const [showTrash, setShowTrash] = useState(false);
 
-  const filtered = useMemo(() =>
-    (sessions ?? []).filter((s) => (s.guestName ?? "").toLowerCase().includes(search.toLowerCase())),
-    [sessions, search]
+  const ONE_HOUR = 60 * 60 * 1000;
+
+  const markServed = (id: number) =>
+    setServedMap((prev) => { const m = new Map(prev); m.set(id, Date.now()); return m; });
+
+  const unmarkServed = (id: number) =>
+    setServedMap((prev) => { const m = new Map(prev); m.delete(id); return m; });
+
+  // Active = not served
+  const activeSessions = useMemo(() =>
+    (sessions ?? []).filter((s) => !servedMap.has(s.id) &&
+      (s.guestName ?? "").toLowerCase().includes(search.toLowerCase())),
+    [sessions, servedMap, search]
+  );
+
+  // Trash = served within last hour
+  const now = Date.now();
+  const trashSessions = useMemo(() =>
+    (sessions ?? []).filter((s) => {
+      const t = servedMap.get(s.id);
+      return t !== undefined && now - t < ONE_HOUR;
+    }),
+    [sessions, servedMap]
   );
 
   const selectedSession = sessions?.find((s) => s.id === selectedId);
 
+  if (showTrash) {
+    return (
+      <div>
+        <button onClick={() => setShowTrash(false)}
+          className="flex items-center gap-2 text-white/50 hover:text-white text-sm mb-5 transition-colors">
+          ← Terug naar bestellingen
+        </button>
+        <div className="mb-4">
+          <h3 className="font-display text-lg font-bold text-white">Prullenbak</h3>
+          <p className="text-white/40 text-xs mt-0.5">Geserveerde bestellingen — worden automatisch verwijderd na 1 uur.</p>
+        </div>
+        <div className="flex flex-col gap-2">
+          {trashSessions.length === 0 ? (
+            <div className="text-center py-10 text-white/30">
+              <div className="text-4xl mb-3">🗑</div>
+              <p>Prullenbak is leeg.</p>
+            </div>
+          ) : trashSessions.map((session) => {
+            const recipes = session.recipes as AdminRecipe[] | null;
+            const servedAt = servedMap.get(session.id)!;
+            const minutesAgo = Math.round((now - servedAt) / 60000);
+            return (
+              <div key={session.id} className="rounded-md px-4 py-3.5 flex items-center justify-between"
+                style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+                <div>
+                  <div className="text-white/60 font-semibold text-sm">{session.guestName ?? "Anoniem"}</div>
+                  <div className="text-white/30 text-xs mt-0.5">
+                    {recipes?.[0]?.name && <span>{recipes[0].name} · </span>}
+                    Geserveerd {minutesAgo === 0 ? "zojuist" : `${minutesAgo} min. geleden`}
+                  </div>
+                </div>
+                <button onClick={() => unmarkServed(session.id)}
+                  className="text-xs rounded px-3 py-1.5 font-semibold transition-all hover:bg-white/10"
+                  style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                  Terugzetten
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   if (selectedSession) {
     const recipes = selectedSession.recipes as AdminRecipe[] | null;
     const recipe = recipes?.[activeRecipeIdx];
-    const isServed = servedIds.has(selectedSession.id);
+    const isServed = servedMap.has(selectedSession.id);
 
     return (
       <div>
@@ -587,9 +653,13 @@ function OrdersTab() {
                 <div className="text-3xl mb-2">✅</div>
                 <div className="font-bold text-white text-lg">Geserveerd!</div>
                 <p className="text-white/50 text-xs mt-1">Cocktail is aan de gast overhandigd.</p>
+                <button onClick={() => { unmarkServed(selectedSession.id); setSelectedId(null); }}
+                  className="mt-3 text-white/30 hover:text-white/60 text-xs underline transition-colors">
+                  Ongedaan maken
+                </button>
               </div>
             ) : (
-              <button onClick={() => setServedIds((prev) => { const s = new Set(prev); s.add(selectedSession.id); return s; })}
+              <button onClick={() => { markServed(selectedSession.id); setSelectedId(null); setActiveRecipeIdx(0); }}
                 className="w-full rounded-md py-4 text-lg font-bold text-white transition-all duration-200 active:scale-95"
                 style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)", boxShadow: "0 0 32px rgba(16,185,129,0.4)" }}>
                 ✓ Markeer als geserveerd
@@ -604,7 +674,16 @@ function OrdersTab() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <span className="text-white/50 text-sm">{(sessions ?? []).length} bestellingen</span>
+        <div className="flex items-center gap-2">
+          <span className="text-white/50 text-sm">{activeSessions.length} bestellingen</span>
+          {trashSessions.length > 0 && (
+            <button onClick={() => setShowTrash(true)}
+              className="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs transition-all hover:text-white/70"
+              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.4)" }}>
+              🗑 {trashSessions.length}
+            </button>
+          )}
+        </div>
         <div className="relative">
           <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30 text-xs">🔍</span>
           <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Zoek op naam..."
@@ -613,12 +692,11 @@ function OrdersTab() {
         </div>
       </div>
       <div className="flex flex-col gap-2">
-        {filtered.map((session) => {
+        {activeSessions.map((session) => {
           const recipes = session.recipes as AdminRecipe[] | null;
-          const isServed = servedIds.has(session.id);
           return (
             <button key={session.id} onClick={() => { setSelectedId(session.id); setActiveRecipeIdx(0); }}
-              className="w-full rounded-md overflow-hidden text-left transition-all duration-150 hover:border-white/20 active:scale-99"
+              className="w-full rounded-md overflow-hidden text-left transition-all duration-150 hover:border-white/20"
               style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
               <div className="flex items-center justify-between px-4 py-3.5">
                 <div>
@@ -630,21 +708,19 @@ function OrdersTab() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {isServed ? (
-                    <span className="text-xs rounded px-2 py-0.5 font-semibold" style={{ background: "rgba(16,185,129,0.2)", color: "#10b981" }}>✓ Geserveerd</span>
-                  ) : session.completed ? (
+                  {session.completed && (
                     <span className="text-xs rounded px-2 py-0.5 font-semibold" style={{ background: "rgba(255,107,53,0.2)", color: "#ff6b35" }}>Besteld</span>
-                  ) : null}
+                  )}
                   <span className="text-white/30 text-sm">→</span>
                 </div>
               </div>
             </button>
           );
         })}
-        {filtered.length === 0 && (
+        {activeSessions.length === 0 && (
           <div className="text-center py-12 text-white/30">
             <div className="text-4xl mb-3">🍹</div>
-            <p>Nog geen bestellingen.</p>
+            <p>Geen openstaande bestellingen.</p>
           </div>
         )}
       </div>
@@ -911,7 +987,7 @@ function SettingsTab() {
 
 export default function Admin() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [activeTab, setActiveTab] = useState<AdminTab>("ingredients");
+  const [activeTab, setActiveTab] = useState<AdminTab>("orders");
   const logoutMutation = trpc.admin.logout.useMutation({ onSuccess: () => setIsLoggedIn(false) });
   const { data: authData } = trpc.admin.checkAuth.useQuery();
   useEffect(() => { if (authData?.authenticated) setIsLoggedIn(true); }, [authData]);
