@@ -43,7 +43,7 @@ const SOCIAL_LABELS: Record<string, string> = {
   solo: "Solo Ontdekker", intimate: "Intieme Sfeer", social: "Sociale Vlinder",
 };
 
-const RANK_LABELS = ["#1 Perfecte match", "#2 Waarschijnlijk ook lekker", "#3 Prima keuze"];
+const RANK_LABELS = ["#1", "#2", "#3"];
 
 function RecipeCard({ recipe, isActive, onClick, rank }: { recipe: Recipe; isActive: boolean; onClick: () => void; rank: number }) {
   const c = recipe.colorHex;

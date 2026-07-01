@@ -84,7 +84,9 @@ CRITICAL RULES:
 - Never use placeholder text or generic descriptions. Be specific and personal.
 - Do not use em dashes (use commas or periods instead). Do not use the word "AI" or "algorithm" anywhere.
 - Write as if you are a wise, warm bartender who truly knows this person.
-- colorHex MUST be a medium to light color (never very dark). The UI has a black background, so dark colors like #1a0a00 or #0d0020 are invisible. Use vibrant, saturated mid-to-light tones: e.g. #ff6b35, #a855f7, #22d3ee, #f59e0b, #ec4899, #10b981, #6366f1, #f97316, #e879f9, #34d399, #fb923c, #818cf8. Brightness should be at least 40% in HSL.
+- colorHex MUST be a medium to light color (never very dark). The UI has a black background, so dark colors like #1a0a00 or #0d0020 are invisible. Use vibrant, saturated mid-to-light tones. Brightness should be at least 40% in HSL.
+- COLOR DIVERSITY IS CRITICAL: The colorHex of each cocktail must be genuinely derived from THIS person's specific quiz answers (their color preference in Q10, their personality, their mood, their flavor profile per principle 15). Do NOT default to orange/gold for everyone. Someone who chose green/teal should get a green cocktail, someone calm and creative gets blue/green, someone passionate gets red/orange, someone imaginative gets purple, someone fresh and bright gets yellow/lime, etc. Groups of friends will take this quiz together and compare results side by side. If everyone gets the same color, they will think the app is fake. The full rainbow is available: reds, oranges, yellows, greens, teals, blues, purples, pinks, magentas. Pick what truly fits the answers.
+- The 3 cocktails for one person should also differ in color from each other, each reflecting a different facet of their personality, while all staying true to who they are.
 
 AVAILABLE INGREDIENTS: ${ingredientList}${allergies && allergies.length > 0 && !allergies.includes("none") ? `\n\nALLERGY RESTRICTIONS — MUST AVOID: ${allergies.join(", ")}. Do NOT include any ingredient related to these restrictions in any of the 3 recipes.` : ""}`;
 
