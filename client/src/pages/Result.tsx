@@ -43,35 +43,28 @@ const SOCIAL_LABELS: Record<string, string> = {
   solo: "Solo Ontdekker", intimate: "Intieme Sfeer", social: "Sociale Vlinder",
 };
 
-const RANK_LABELS = [
-  { num: "#1", label: "Perfecte match", color: "#f59e0b" },
-  { num: "#2", label: "Waarschijnlijk ook lekker", color: "#a855f7" },
-  { num: "#3", label: "Prima keuze", color: "#22d3ee" },
-];
+const RANK_LABELS = ["#1 Perfecte match", "#2 Waarschijnlijk ook lekker", "#3 Prima keuze"];
 
 function RecipeCard({ recipe, isActive, onClick, rank }: { recipe: Recipe; isActive: boolean; onClick: () => void; rank: number }) {
-  const rankInfo = RANK_LABELS[rank] ?? RANK_LABELS[2];
+  const c = recipe.colorHex;
   return (
     <button
       onClick={onClick}
       className="rounded-md p-4 text-left transition-all duration-200 active:scale-98 w-full"
       style={{
-        background: isActive
-          ? `linear-gradient(135deg, ${recipe.colorHex}30, ${recipe.colorHex}10)`
-          : "rgba(255,255,255,0.04)",
-        border: isActive ? `2px solid ${recipe.colorHex}` : "1.5px solid rgba(255,255,255,0.1)",
+        background: isActive ? `linear-gradient(135deg, ${c}30, ${c}10)` : "rgba(255,255,255,0.04)",
+        border: isActive ? `2px solid ${c}` : "1.5px solid rgba(255,255,255,0.1)",
       }}
     >
       <div className="flex items-center gap-2 mb-2">
-        <span className="text-xs font-black px-2 py-0.5 rounded-full"
-          style={{ background: `${rankInfo.color}22`, color: rankInfo.color, border: `1px solid ${rankInfo.color}55` }}>
-          {rankInfo.num}
+        <span className="text-xs font-bold px-2 py-0.5 rounded-full"
+          style={{ background: `${c}25`, color: c, border: `1px solid ${c}60` }}>
+          {RANK_LABELS[rank] ?? RANK_LABELS[2]}
         </span>
-        <span className="text-xs" style={{ color: rankInfo.color + "aa" }}>{rankInfo.label}</span>
       </div>
       <div className="flex items-center gap-3 mb-1.5">
         <div className="w-7 h-7 rounded-full flex-shrink-0"
-          style={{ background: recipe.colorHex, boxShadow: `0 0 10px ${recipe.colorHex}66` }} />
+          style={{ background: c, boxShadow: `0 0 10px ${c}66` }} />
         <div>
           <div className="font-display text-base font-bold text-white leading-tight">{recipe.name}</div>
           <div className="text-white/40 text-xs">{recipe.spiritBase}</div>
