@@ -123,7 +123,7 @@ Return a JSON object with this exact structure:
 }`;
 
   const response = await invokeLLM({
-    model: "claude-sonnet-4-5",
+    model: "claude-haiku-4-5-20251001",
     maxTokens: 8192,
     messages: [
       { role: "system", content: systemPrompt },
@@ -376,7 +376,7 @@ export const appRouter = router({
         if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
 
         const response = await invokeLLM({
-          model: "claude-sonnet-4-5",
+          model: "claude-haiku-4-5-20251001",
           messages: [
             {
               role: "system",
