@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import QRCodeLib from "qrcode";
+import { jsPDF } from "jspdf";
 
 type AdminTab = "ingredients" | "orders" | "qrcodes" | "settings";
 
@@ -693,17 +694,10 @@ function QRCodesTab() {
 
   const downloadPDF = () => {
     if (!cardDataUrl) return;
-    const win = window.open("", "_blank");
-    if (!win) return;
-    win.document.write(
-      `<!DOCTYPE html><html><head><title>Cocktailored QR Kaartje</title>` +
-      `<style>*{box-sizing:border-box}body{margin:0;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:system-ui,sans-serif;gap:16px}` +
-      `img{width:90mm;height:90mm;border-radius:8px}p{font-size:11px;color:#666;text-align:center}` +
-      `@media print{p{display:none}body{min-height:auto}img{width:100%;border-radius:0}}</style></head>` +
-      `<body><img src="${cardDataUrl}"/><p>Sla op als PDF of druk direct af — kies 'Opslaan als PDF' als printer.</p>` +
-      `<script>window.onload=function(){window.print()}<\/script></body></html>`
-    );
-    win.document.close();
+    const mmSize = 90;
+    const doc = new jsPDF({ unit: "mm", format: [mmSize, mmSize], orientation: "portrait" });
+    doc.addImage(cardDataUrl, "PNG", 0, 0, mmSize, mmSize);
+    doc.save("cocktailored-qr.pdf");
   };
 
   const downloadPNG = () => {
