@@ -7,12 +7,12 @@ const QUESTIONS = [
   {
     id: 1,
     emoji: "🌅",
-    question: "It's a perfect evening. Where are you?",
+    question: "Het is een perfecte avond. Waar ben je?",
     options: [
-      { value: "rooftop_party", label: "Rooftop with a crowd, music pumping" },
-      { value: "beach_sunset", label: "Beach at sunset, barefoot in the sand" },
-      { value: "cozy_bar", label: "A cozy bar with close friends" },
-      { value: "home_alone", label: "Home alone, fully unwinding" },
+      { value: "rooftop_party", label: "Op het dak met een menigte, muziek staat aan" },
+      { value: "beach_sunset", label: "Op het strand bij zonsondergang, blootsvoets in het zand" },
+      { value: "cozy_bar", label: "In een gezellige bar met goede vrienden" },
+      { value: "home_alone", label: "Thuis alleen, volledig ontspannen" },
     ],
     splashColor: "#ff6b35",
     secondaryColor: "#f59e0b",
@@ -20,12 +20,12 @@ const QUESTIONS = [
   {
     id: 2,
     emoji: "🎭",
-    question: "Pick the word that feels most like you right now.",
+    question: "Kies het woord dat het meest bij jou past op dit moment.",
     options: [
       { value: "wild", label: "Wild" },
       { value: "chill", label: "Chill" },
-      { value: "curious", label: "Curious" },
-      { value: "romantic", label: "Romantic" },
+      { value: "curious", label: "Nieuwsgierig" },
+      { value: "romantic", label: "Romantisch" },
     ],
     splashColor: "#a855f7",
     secondaryColor: "#ec4899",
@@ -33,12 +33,12 @@ const QUESTIONS = [
   {
     id: 3,
     emoji: "🍋",
-    question: "You bite into a lemon. Your reaction is...",
+    question: "Je bijt in een citroen. Jouw reactie is...",
     options: [
-      { value: "love_it", label: "Love it. Bring more." },
-      { value: "wince_enjoy", label: "I wince but secretly enjoy it" },
-      { value: "need_sugar", label: "I need sugar with that" },
-      { value: "absolutely_not", label: "Absolutely not, thanks" },
+      { value: "love_it", label: "Heerlijk. Geef meer." },
+      { value: "wince_enjoy", label: "Ik trek een vies gezicht maar geniet er stiekem van" },
+      { value: "need_sugar", label: "Ik heb er suiker bij nodig" },
+      { value: "absolutely_not", label: "Absoluut niet, bedankt" },
     ],
     splashColor: "#f59e0b",
     secondaryColor: "#10b981",
@@ -46,12 +46,12 @@ const QUESTIONS = [
   {
     id: 4,
     emoji: "🌶",
-    question: "How do you feel about spicy food?",
+    question: "Hoe sta jij tegenover pittig eten?",
     options: [
-      { value: "obsessed", label: "Obsessed. The hotter the better." },
-      { value: "enjoy_medium", label: "I enjoy a good kick" },
-      { value: "mild_only", label: "Mild only, please" },
-      { value: "no_spice", label: "I avoid spice entirely" },
+      { value: "obsessed", label: "Obsessief. Hoe heter, hoe beter." },
+      { value: "enjoy_medium", label: "Ik geniet van een flinke kick" },
+      { value: "mild_only", label: "Lekker mild graag" },
+      { value: "no_spice", label: "Ik vermijd pittig volledig" },
     ],
     splashColor: "#ef4444",
     secondaryColor: "#f59e0b",
@@ -59,12 +59,12 @@ const QUESTIONS = [
   {
     id: 5,
     emoji: "🎵",
-    question: "What music are you in the mood for tonight?",
+    question: "Waar heb je vanavond zin in qua muziek?",
     options: [
-      { value: "deep_house", label: "Deep house or techno" },
-      { value: "tropical_vibes", label: "Tropical, reggaeton, something sunny" },
-      { value: "jazz_soul", label: "Jazz or soul, something smooth" },
-      { value: "indie_chill", label: "Indie or chill lo-fi" },
+      { value: "deep_house", label: "Deep house of techno" },
+      { value: "tropical_vibes", label: "Tropisch, reggaeton, iets zonnigs" },
+      { value: "jazz_soul", label: "Jazz of soul, iets smooth" },
+      { value: "indie_chill", label: "Indie of chill lo-fi" },
     ],
     splashColor: "#22d3ee",
     secondaryColor: "#6366f1",
@@ -72,12 +72,12 @@ const QUESTIONS = [
   {
     id: 6,
     emoji: "🌿",
-    question: "Pick your vibe from nature.",
+    question: "Kies jouw vibe uit de natuur.",
     options: [
-      { value: "tropical_jungle", label: "Tropical jungle, lush and wild" },
-      { value: "ocean_breeze", label: "Ocean breeze, salty and free" },
-      { value: "pine_forest", label: "Pine forest, earthy and grounding" },
-      { value: "desert_night", label: "Desert at night, smoky and mysterious" },
+      { value: "tropical_jungle", label: "Tropische jungle, weelderig en wild" },
+      { value: "ocean_breeze", label: "Oceaanbriesje, zout en vrij" },
+      { value: "pine_forest", label: "Dennenbos, aards en rustgevend" },
+      { value: "desert_night", label: "Woestijn 's nachts, rokerig en mysterieus" },
     ],
     splashColor: "#10b981",
     secondaryColor: "#22d3ee",
@@ -85,12 +85,12 @@ const QUESTIONS = [
   {
     id: 7,
     emoji: "🍫",
-    question: "Your ideal sweet treat is...",
+    question: "Jouw ideale zoete verwennerij is...",
     options: [
-      { value: "dark_chocolate", label: "Dark chocolate, 85% or higher" },
-      { value: "tropical_fruit", label: "Fresh tropical fruit" },
-      { value: "salted_caramel", label: "Salted caramel anything" },
-      { value: "creamy_vanilla", label: "Creamy vanilla or coconut" },
+      { value: "dark_chocolate", label: "Pure chocolade, 85% of meer" },
+      { value: "tropical_fruit", label: "Vers tropisch fruit" },
+      { value: "salted_caramel", label: "Gezouten karamel in elke vorm" },
+      { value: "creamy_vanilla", label: "Romige vanille of kokos" },
     ],
     splashColor: "#a855f7",
     secondaryColor: "#f59e0b",
@@ -98,12 +98,12 @@ const QUESTIONS = [
   {
     id: 8,
     emoji: "💫",
-    question: "How adventurous are you feeling with your drink tonight?",
+    question: "Hoe avontuurlijk voel jij je vanavond met je drankje?",
     options: [
-      { value: "surprise_me", label: "Surprise me completely. I trust you." },
-      { value: "adventurous_twist", label: "Something new but not too weird" },
-      { value: "familiar_twist", label: "A classic with a twist" },
-      { value: "keep_classic", label: "Keep it classic and familiar" },
+      { value: "surprise_me", label: "Verras me volledig. Ik vertrouw je." },
+      { value: "adventurous_twist", label: "Iets nieuws maar niet te vreemd" },
+      { value: "familiar_twist", label: "Een klassieker met een twist" },
+      { value: "keep_classic", label: "Houd het klassiek en vertrouwd" },
     ],
     splashColor: "#ec4899",
     secondaryColor: "#a855f7",
@@ -111,12 +111,12 @@ const QUESTIONS = [
   {
     id: 9,
     emoji: "⚡",
-    question: "What do you want from this drink?",
+    question: "Wat wil je van dit drankje?",
     options: [
-      { value: "energy_up", label: "Energy up. I want to feel alive." },
-      { value: "warm_glow", label: "A warm, happy glow" },
-      { value: "deep_relax", label: "Deep relaxation" },
-      { value: "social_spark", label: "Something to spark conversation" },
+      { value: "energy_up", label: "Energie omhoog. Ik wil me levendig voelen." },
+      { value: "warm_glow", label: "Een warm, blij gevoel" },
+      { value: "deep_relax", label: "Diepe ontspanning" },
+      { value: "social_spark", label: "Iets om een gesprek op gang te brengen" },
     ],
     splashColor: "#f59e0b",
     secondaryColor: "#ff6b35",
@@ -124,12 +124,12 @@ const QUESTIONS = [
   {
     id: 10,
     emoji: "🎨",
-    question: "Pick a color that speaks to you right now.",
+    question: "Kies een kleur die nu bij jou past.",
     options: [
-      { value: "deep_purple", label: "Deep purple or midnight blue" },
-      { value: "bright_orange", label: "Bright orange or coral" },
-      { value: "electric_green", label: "Electric green or teal" },
-      { value: "warm_gold", label: "Warm gold or amber" },
+      { value: "deep_purple", label: "Diep paars of middernachtblauw" },
+      { value: "bright_orange", label: "Helder oranje of koraal" },
+      { value: "electric_green", label: "Elektrisch groen of teal" },
+      { value: "warm_gold", label: "Warm goud of amber" },
     ],
     splashColor: "#6366f1",
     secondaryColor: "#22d3ee",
@@ -139,13 +139,13 @@ const QUESTIONS = [
 type QuizPhase = "name" | "questions" | "allergies" | "generating";
 
 const ALLERGY_OPTIONS = [
-  { value: "none", label: "None — I'm good with everything", emoji: "✓" },
-  { value: "nuts", label: "Nuts", emoji: "🥜" },
-  { value: "dairy", label: "Dairy / Cream", emoji: "🧊" },
+  { value: "none", label: "Geen — Ik verdraag alles", emoji: "✓" },
+  { value: "nuts", label: "Noten", emoji: "🥜" },
+  { value: "dairy", label: "Zuivel / Room", emoji: "🧊" },
   { value: "gluten", label: "Gluten", emoji: "🌾" },
   { value: "citrus", label: "Citrus", emoji: "🍋" },
-  { value: "eggs", label: "Eggs", emoji: "🥚" },
-  { value: "shellfish", label: "Shellfish", emoji: "🦐" },
+  { value: "eggs", label: "Eieren", emoji: "🥚" },
+  { value: "shellfish", label: "Schaaldieren", emoji: "🦐" },
 ];
 
 export default function Quiz() {
@@ -169,7 +169,7 @@ export default function Quiz() {
 
   const handleStartQuiz = () => {
     if (!guestName.trim()) {
-      setNameError("Tell us your name first!");
+      setNameError("Vertel ons eerst je naam!");
       return;
     }
     setPhase("questions");
@@ -215,7 +215,7 @@ export default function Quiz() {
 
   const handleAllergySubmit = (collectedAnswers: Record<number, string>) => {
     if (selectedAllergies.length === 0) {
-      setAllergyError("Select at least one option above.");
+      setAllergyError("Selecteer minstens één optie hierboven.");
       return;
     }
     setPhase("generating");
@@ -263,9 +263,9 @@ export default function Quiz() {
           <div className="text-center mb-8">
             <div className="text-6xl mb-4 float-anim">🍹</div>
             <h1 className="font-display text-4xl font-bold text-white mb-2">
-              Let's find your cocktail
+              Laten we jouw cocktail vinden
             </h1>
-            <p className="text-white/60">First, what should we call you?</p>
+            <p className="text-white/60">Eerst, hoe mogen we je noemen?</p>
           </div>
 
           <div className="rounded-2xl p-6" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)" }}>
@@ -274,7 +274,7 @@ export default function Quiz() {
               value={guestName}
               onChange={(e) => { setGuestName(e.target.value); setNameError(""); }}
               onKeyDown={(e) => e.key === "Enter" && handleStartQuiz()}
-              placeholder="Your name..."
+              placeholder="Jouw naam..."
               className="w-full rounded-xl px-4 py-4 text-lg text-white placeholder-white/30 outline-none mb-4"
               style={{ background: "rgba(255,255,255,0.08)", border: "1.5px solid rgba(255,255,255,0.15)" }}
               autoFocus
@@ -285,7 +285,7 @@ export default function Quiz() {
               className="w-full rounded-xl py-4 text-lg font-bold text-black transition-all duration-200 active:scale-95"
               style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}
             >
-              Start the Quiz →
+              Start de Quiz →
             </button>
           </div>
         </div>
@@ -309,10 +309,10 @@ export default function Quiz() {
         <div className="relative z-10 px-4 pt-6 pb-2">
           <div className="flex items-center justify-between mb-2">
             <button onClick={() => setPhase("questions")} className="text-white/40 hover:text-white/70 text-sm transition-colors">
-              ← Back
+              ← Terug
             </button>
             <span className="text-sm font-semibold px-3 py-1 rounded-full" style={{ background: "rgba(16,185,129,0.2)", color: "#10b981" }}>
-              Almost there!
+              Bijna klaar!
             </span>
           </div>
           <div className="w-full h-2 rounded-full" style={{ background: "rgba(255,255,255,0.1)" }}>
@@ -326,9 +326,9 @@ export default function Quiz() {
             <div className="text-center mb-6">
               <div className="text-5xl mb-3">🌿</div>
               <h2 className="font-display text-2xl sm:text-3xl font-bold text-white leading-tight mb-2">
-                Any allergies or ingredients to avoid?
+                Allergieën of ingrediënten te vermijden?
               </h2>
-              <p className="text-white/50 text-sm">We'll make sure none of these appear in your recipes.</p>
+              <p className="text-white/50 text-sm">We zorgen ervoor dat geen van deze in jouw recepten verschijnt.</p>
             </div>
 
             {/* Options — single column like cocktailored.ai */}
@@ -366,20 +366,20 @@ export default function Quiz() {
               type="text"
               value={allergyOther}
               onChange={(e) => setAllergyOther(e.target.value)}
-              placeholder="Other allergy or ingredient to avoid..."
+              placeholder="Andere allergie of ingrediënt te vermijden..."
               className="w-full rounded-xl px-4 py-3 text-sm text-white placeholder-white/30 outline-none mb-1"
               style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)" }}
             />
 
             {allergyError && <p className="text-red-400 text-xs mt-1 mb-2">{allergyError}</p>}
-            {!allergyError && <p className="text-white/30 text-xs mt-1 mb-4">Select at least one option above</p>}
+            {!allergyError && <p className="text-white/30 text-xs mt-1 mb-4">Selecteer minstens één optie hierboven</p>}
 
             <button
               onClick={() => handleAllergySubmit(answers)}
               className="w-full rounded-xl py-4 text-lg font-bold text-white transition-all duration-200 active:scale-95 mt-2"
               style={{ background: "linear-gradient(135deg, #0d9488, #10b981)", boxShadow: "0 0 32px rgba(16,185,129,0.4)" }}
             >
-              Brew My Cocktails →
+              Brew Mijn Cocktails →
             </button>
           </div>
         </div>
@@ -396,9 +396,9 @@ export default function Quiz() {
         <div className="relative z-10 text-center">
           <div className="text-7xl mb-6 float-anim">🧪</div>
           <h2 className="font-display text-4xl font-bold text-white mb-4">
-            Mixing your cocktail...
+            Jouw cocktail wordt gemixt...
           </h2>
-          <p className="text-white/60 text-lg mb-8">Reading your flavor psychology and crafting 3 personalised recipes.</p>
+          <p className="text-white/60 text-lg mb-8">Jouw smaakpsychologie wordt gelezen en 3 gepersonaliseerde recepten worden samengesteld.</p>
           <div className="flex gap-2 justify-center">
             {["#ff6b35", "#a855f7", "#22d3ee"].map((c, i) => (
               <div key={i} className="w-3 h-3 rounded-full animate-bounce"
@@ -436,7 +436,7 @@ export default function Quiz() {
       <div className="relative z-10 px-4 pt-6 pb-2">
         <div className="flex items-center justify-between mb-2">
           <button onClick={() => setLocation("/")} className="text-white/40 hover:text-white/70 text-sm transition-colors">
-            ← Back
+            ← Terug
           </button>
           <span className="text-white/40 text-sm">{currentQ + 1} / {QUESTIONS.length}</span>
         </div>

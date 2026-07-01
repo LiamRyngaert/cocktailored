@@ -2,19 +2,156 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
-type AdminTab = "ingredients" | "sessions" | "settings";
+type AdminTab = "ingredients" | "orders" | "qrcodes" | "settings";
 
 const CATEGORIES = ["spirits", "liqueurs", "mixers", "juices", "syrups", "bitters", "garnishes", "other"];
 
 const CATEGORY_LABELS: Record<string, string> = {
-  spirits: "Spirits", liqueurs: "Liqueurs", mixers: "Mixers", juices: "Juices",
-  syrups: "Syrups", bitters: "Bitters", garnishes: "Garnishes", other: "Other",
+  spirits: "Sterkedrank", liqueurs: "Likeuren", mixers: "Mixers", juices: "Sappen",
+  syrups: "Siropen", bitters: "Bitters", garnishes: "Garnering", other: "Overig",
 };
 
 const CATEGORY_COLORS: Record<string, string> = {
   spirits: "#ff6b35", liqueurs: "#a855f7", mixers: "#22d3ee", juices: "#f59e0b",
   syrups: "#ec4899", bitters: "#10b981", garnishes: "#6366f1", other: "#94a3b8",
 };
+
+// ── Canvas helpers (used by QR tab) ─────────────────────────────────────────
+
+function measureTextSpaced(ctx: CanvasRenderingContext2D, text: string, sp: number) {
+  let w = 0;
+  for (let i = 0; i < text.length; i++) {
+    w += ctx.measureText(text[i]).width;
+    if (i < text.length - 1) w += sp;
+  }
+  return w;
+}
+
+function drawTextSpaced(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, sp: number) {
+  let cx = x;
+  for (let i = 0; i < text.length; i++) {
+    ctx.fillText(text[i], cx, y);
+    cx += ctx.measureText(text[i]).width + sp;
+  }
+}
+
+function drawRadialBlob(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, color: string) {
+  const tmp = document.createElement("canvas");
+  tmp.width = r * 2; tmp.height = r * 2;
+  const tc = tmp.getContext("2d")!;
+  const rg = tc.createRadialGradient(r, r, 0, r, r, r);
+  rg.addColorStop(0, color); rg.addColorStop(1, "transparent");
+  tc.fillStyle = rg;
+  tc.beginPath(); tc.arc(r, r, r, 0, Math.PI * 2); tc.fill();
+  ctx.drawImage(tmp, x - r, y - r);
+}
+
+function applyGradientToQR(qrImg: HTMLImageElement, gradIdx: number, size: number): HTMLCanvasElement {
+  const tmpC = document.createElement("canvas");
+  tmpC.width = size; tmpC.height = size;
+  const tmpCtx = tmpC.getContext("2d")!;
+  tmpCtx.drawImage(qrImg, 0, 0, size, size);
+  const d = tmpCtx.getImageData(0, 0, size, size).data;
+
+  const gradC = document.createElement("canvas");
+  gradC.width = size; gradC.height = size;
+  const gc = gradC.getContext("2d")!;
+  let g: CanvasGradient;
+  if (gradIdx === 0) {
+    g = gc.createLinearGradient(0, 0, size, size);
+    g.addColorStop(0, "#ff9a00"); g.addColorStop(0.45, "#ff3cac"); g.addColorStop(1, "#9b59b6");
+  } else if (gradIdx === 1) {
+    g = gc.createLinearGradient(0, 0, size, size);
+    g.addColorStop(0, "#ff9a00"); g.addColorStop(0.2, "#ff6b35"); g.addColorStop(0.45, "#ff3cac");
+    g.addColorStop(0.72, "#c800ff"); g.addColorStop(1, "#7b2fff");
+  } else if (gradIdx === 2) {
+    g = gc.createConicGradient(0, size / 2, size / 2);
+    g.addColorStop(0, "#ff9a00"); g.addColorStop(0.25, "#ff3cac"); g.addColorStop(0.5, "#9b59b6");
+    g.addColorStop(0.75, "#3b82f6"); g.addColorStop(1, "#ff9a00");
+  } else {
+    g = gc.createRadialGradient(size * 0.3, size * 0.3, 0, size / 2, size / 2, size * 0.75);
+    g.addColorStop(0, "#ff9a00"); g.addColorStop(0.4, "#ff3cac"); g.addColorStop(1, "#9b59b6");
+  }
+  gc.fillStyle = g; gc.fillRect(0, 0, size, size);
+  const gd = gc.getImageData(0, 0, size, size).data;
+
+  const out = document.createElement("canvas");
+  out.width = size; out.height = size;
+  const oc = out.getContext("2d")!;
+  const od = oc.createImageData(size, size);
+  const o = od.data;
+  const bg = 13;
+  for (let i = 0; i < d.length; i += 4) {
+    const t = 1 - Math.min((d[i] + d[i + 1] + d[i + 2]) / 3 / 200, 1);
+    o[i] = Math.round(gd[i] * t + bg * (1 - t));
+    o[i + 1] = Math.round(gd[i + 1] * t + bg * (1 - t));
+    o[i + 2] = Math.round(gd[i + 2] * t + bg * (1 - t));
+    o[i + 3] = 255;
+  }
+  oc.putImageData(od, 0, 0);
+  return out;
+}
+
+function buildCardCanvas(qrCanvas: HTMLCanvasElement): HTMLCanvasElement {
+  const SIZE = 900, QR = 640;
+  const off = document.createElement("canvas");
+  off.width = SIZE; off.height = SIZE;
+  const ctx = off.getContext("2d")!;
+  const r = 56;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(r, 0); ctx.lineTo(SIZE - r, 0); ctx.quadraticCurveTo(SIZE, 0, SIZE, r);
+  ctx.lineTo(SIZE, SIZE - r); ctx.quadraticCurveTo(SIZE, SIZE, SIZE - r, SIZE);
+  ctx.lineTo(r, SIZE); ctx.quadraticCurveTo(0, SIZE, 0, SIZE - r);
+  ctx.lineTo(0, r); ctx.quadraticCurveTo(0, 0, r, 0);
+  ctx.closePath(); ctx.clip();
+  ctx.fillStyle = "#0a0a0a"; ctx.fillRect(0, 0, SIZE, SIZE);
+  drawRadialBlob(ctx, 0, 0, 280, "rgba(180,60,20,0.55)");
+  drawRadialBlob(ctx, SIZE, SIZE, 300, "rgba(60,20,100,0.65)");
+  drawRadialBlob(ctx, 0, SIZE, 220, "rgba(10,80,80,0.5)");
+  ctx.textBaseline = "middle";
+  ctx.font = "800 76px system-ui, sans-serif";
+  const SP = 2;
+  const cW = measureTextSpaced(ctx, "Cocktail", SP);
+  const oW = measureTextSpaced(ctx, "ored", SP);
+  const sx = (SIZE - cW - oW) / 2;
+  ctx.fillStyle = "#ffffff";
+  drawTextSpaced(ctx, "Cocktail", sx, 96, SP);
+  const gT = ctx.createLinearGradient(sx + cW, 0, sx + cW + oW, 0);
+  gT.addColorStop(0, "#ff3cac"); gT.addColorStop(1, "#9b59b6");
+  ctx.fillStyle = gT;
+  drawTextSpaced(ctx, "ored", sx + cW, 96, SP);
+  const qrBox = document.createElement("canvas");
+  qrBox.width = QR; qrBox.height = QR;
+  const qc = qrBox.getContext("2d")!;
+  const ir = 24, pw = QR * 0.02;
+  const roundedPath = (c: CanvasRenderingContext2D, w: number, h: number, rr: number) => {
+    c.beginPath();
+    c.moveTo(rr, 0); c.lineTo(w - rr, 0); c.quadraticCurveTo(w, 0, w, rr);
+    c.lineTo(w, h - rr); c.quadraticCurveTo(w, h, w - rr, h);
+    c.lineTo(rr, h); c.quadraticCurveTo(0, h, 0, h - rr);
+    c.lineTo(0, rr); c.quadraticCurveTo(0, 0, rr, 0);
+    c.closePath();
+  };
+  qc.fillStyle = "#0a0a0a"; qc.strokeStyle = "rgba(255,255,255,0.07)"; qc.lineWidth = 3;
+  roundedPath(qc, QR, QR, ir); qc.fill(); qc.stroke();
+  qc.save(); roundedPath(qc, QR, QR, ir); qc.clip();
+  qc.drawImage(qrCanvas, pw, pw, QR - pw * 2, QR - pw * 2);
+  qc.restore();
+  ctx.drawImage(qrBox, (SIZE - QR) / 2, (SIZE - QR) / 2 + 22);
+  ctx.font = "700 24px system-ui, sans-serif";
+  const sl = "ORDER YOUR PERSONALIZED COCKTAIL";
+  const SSP = 6;
+  const sW = measureTextSpaced(ctx, sl, SSP);
+  const sG = ctx.createLinearGradient((SIZE - sW) / 2, 0, (SIZE - sW) / 2 + sW, 0);
+  sG.addColorStop(0, "#ff9a00"); sG.addColorStop(0.5, "#ff3cac"); sG.addColorStop(1, "#9b59b6");
+  ctx.fillStyle = sG;
+  drawTextSpaced(ctx, sl, (SIZE - sW) / 2, SIZE - 55, SSP);
+  ctx.restore();
+  return off;
+}
+
+// ── Login ────────────────────────────────────────────────────────────────────
 
 function LoginPage({ onLogin }: { onLogin: () => void }) {
   const [username, setUsername] = useState("");
@@ -23,12 +160,12 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
   const loginMutation = trpc.admin.login.useMutation();
 
   const handleLogin = async () => {
-    if (!username || !password) { setError("Fill in both fields."); return; }
+    if (!username || !password) { setError("Vul beide velden in."); return; }
     try {
       await loginMutation.mutateAsync({ username, password });
       onLogin();
     } catch {
-      setError("Wrong credentials. Try again.");
+      setError("Verkeerde inloggegevens. Probeer opnieuw.");
     }
   };
 
@@ -36,44 +173,29 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
     <div className="min-h-screen bg-background flex items-center justify-center px-4 relative overflow-hidden">
       <div className="absolute liquid-blob" style={{ width: 320, height: 320, background: "#ff6b35", opacity: 0.08, top: "5%", left: "-8%" }} />
       <div className="absolute liquid-blob" style={{ width: 260, height: 260, background: "#a855f7", opacity: 0.08, bottom: "8%", right: "-6%", animationDelay: "3s" }} />
-
       <div className="relative z-10 w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-lg mb-4"
-            style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}>
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-lg mb-4" style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}>
             <span className="text-3xl">🍹</span>
           </div>
           <h1 className="font-display text-3xl font-bold text-white">Beast Bar Admin</h1>
-          <p className="text-white/40 text-sm mt-1">Manage your bar</p>
+          <p className="text-white/40 text-sm mt-1">Beheer je bar</p>
         </div>
         <div className="rounded-lg p-6" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>
-          <label className="block text-white/60 text-xs uppercase tracking-wider mb-1.5">Username</label>
-          <input
-            type="text"
-            value={username}
-            onChange={(e) => { setUsername(e.target.value); setError(""); }}
-            placeholder="Username"
+          <label className="block text-white/60 text-xs uppercase tracking-wider mb-1.5">Gebruikersnaam</label>
+          <input type="text" value={username} onChange={(e) => { setUsername(e.target.value); setError(""); }} placeholder="Gebruikersnaam"
             className="w-full rounded-md px-4 py-3 text-white placeholder-white/30 outline-none mb-4"
-            style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)" }}
-          />
-          <label className="block text-white/60 text-xs uppercase tracking-wider mb-1.5">Password</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => { setPassword(e.target.value); setError(""); }}
-            onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-            placeholder="Password"
+            style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)" }} />
+          <label className="block text-white/60 text-xs uppercase tracking-wider mb-1.5">Wachtwoord</label>
+          <input type="password" value={password} onChange={(e) => { setPassword(e.target.value); setError(""); }}
+            onKeyDown={(e) => e.key === "Enter" && handleLogin()} placeholder="Wachtwoord"
             className="w-full rounded-md px-4 py-3 text-white placeholder-white/30 outline-none mb-5"
-            style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)" }}
-          />
+            style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)" }} />
           {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
-          <button
-            onClick={handleLogin}
-            disabled={loginMutation.isPending}
+          <button onClick={handleLogin} disabled={loginMutation.isPending}
             className="w-full rounded-md py-3 font-bold text-black transition-all duration-200 active:scale-95 disabled:opacity-50"
-            style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}
-          >
-            {loginMutation.isPending ? "Logging in..." : "Log In"}
+            style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}>
+            {loginMutation.isPending ? "Inloggen..." : "Inloggen"}
           </button>
         </div>
       </div>
@@ -81,26 +203,23 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
   );
 }
 
+// ── Ingredient toggle ────────────────────────────────────────────────────────
+
 function IngredientToggle({ available, onChange }: { available: boolean; onChange: () => void }) {
   return (
-    <button
-      onClick={onChange}
-      className="relative w-10 h-5 rounded-full transition-all duration-200 flex-shrink-0"
-      style={{
-        background: available ? "linear-gradient(135deg, #10b981, #22d3ee)" : "rgba(255,255,255,0.12)",
-      }}
-    >
-      <div
-        className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all duration-200"
-        style={{ left: available ? "calc(100% - 1.125rem)" : "0.125rem" }}
-      />
+    <button onClick={onChange} className="relative w-10 h-5 rounded-full transition-all duration-200 flex-shrink-0"
+      style={{ background: available ? "linear-gradient(135deg, #10b981, #22d3ee)" : "rgba(255,255,255,0.12)" }}>
+      <div className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all duration-200"
+        style={{ left: available ? "calc(100% - 1.125rem)" : "0.125rem" }} />
     </button>
   );
 }
 
+// ── Photo scanner ────────────────────────────────────────────────────────────
+
 function PhotoScanner({ onAdd }: { onAdd: (name: string, category: string) => void }) {
-  const cameraInputRef = useRef<HTMLInputElement>(null);
-  const galleryInputRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
   const [scanning, setScanning] = useState(false);
   const [results, setResults] = useState<Array<{ name: string; category: string; confidence: string }> | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -108,147 +227,87 @@ function PhotoScanner({ onAdd }: { onAdd: (name: string, category: string) => vo
 
   const scanMutation = trpc.admin.scanIngredientPhoto.useMutation({
     onSuccess: (data) => {
-      if (!data.ingredients || data.ingredients.length === 0) {
-        toast.error("No ingredients found in photo. Try a clearer shot.");
-        setScanning(false);
-        return;
-      }
+      if (!data.ingredients?.length) { toast.error("Geen ingrediënten gevonden. Probeer een scherpere foto."); setScanning(false); return; }
       setResults(data.ingredients);
       setSelected(new Set(data.ingredients.map((_, i) => i)));
       setScanning(false);
     },
-    onError: (err) => {
-      toast.error(err.message ?? "Could not identify ingredients. Try a clearer photo.");
-      setScanning(false);
-    },
+    onError: (err) => { toast.error(err.message ?? "Kon ingrediënten niet identificeren."); setScanning(false); },
   });
 
   const handleFile = (file: File) => {
-    if (!file.type.startsWith("image/")) { toast.error("Please select an image file."); return; }
-    if (file.size > 10 * 1024 * 1024) { toast.error("Image too large. Max 10MB."); return; }
-    setScanning(true);
-    setResults(null);
+    if (!file.type.startsWith("image/")) { toast.error("Selecteer een afbeeldingsbestand."); return; }
+    if (file.size > 10 * 1024 * 1024) { toast.error("Afbeelding te groot. Max 10MB."); return; }
+    setScanning(true); setResults(null);
     const reader = new FileReader();
-    reader.onerror = () => { toast.error("Could not read file."); setScanning(false); };
+    reader.onerror = () => { toast.error("Kon bestand niet lezen."); setScanning(false); };
     reader.onload = (e) => {
       const dataUrl = e.target?.result as string;
-      if (!dataUrl) { toast.error("Could not read file."); setScanning(false); return; }
+      if (!dataUrl) { toast.error("Kon bestand niet lezen."); setScanning(false); return; }
       scanMutation.mutate({ imageBase64: dataUrl });
     };
     reader.readAsDataURL(file);
   };
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
-  };
+  const handleDrop = (e: React.DragEvent) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f); };
+  const reset = () => { setResults(null); setSelected(new Set()); setScanning(false); };
 
   const handleAddSelected = async () => {
     if (!results) return;
     setAdding(true);
     const toAdd = results.filter((_, i) => selected.has(i));
-    for (const ing of toAdd) {
-      onAdd(ing.name, ing.category);
-      await new Promise((r) => setTimeout(r, 80));
-    }
-    toast.success(`Added ${toAdd.length} ingredient${toAdd.length !== 1 ? "s" : ""} from photo!`);
-    setResults(null);
-    setSelected(new Set());
-    setAdding(false);
+    for (const ing of toAdd) { onAdd(ing.name, ing.category); await new Promise((r) => setTimeout(r, 80)); }
+    toast.success(`${toAdd.length} ingrediënt${toAdd.length !== 1 ? "en" : ""} toegevoegd!`);
+    setResults(null); setSelected(new Set()); setAdding(false);
   };
 
-  const reset = () => { setResults(null); setSelected(new Set()); setScanning(false); };
-
-  const CONFIDENCE_COLORS: Record<string, string> = { high: "#10b981", medium: "#f59e0b", low: "#ef4444" };
+  const CONF_COLORS: Record<string, string> = { high: "#10b981", medium: "#f59e0b", low: "#ef4444" };
 
   return (
     <div className="mb-4">
       <div className="text-white/50 text-xs uppercase tracking-wider mb-2 flex items-center gap-2">
-        <span>📸</span> Scan ingredients by photo
+        <span>📸</span> Scan ingrediënten via foto
       </div>
-
       {!results && !scanning && (
         <>
-          <div
-            onDrop={handleDrop}
-            onDragOver={(e) => e.preventDefault()}
-            className="transition-all duration-150"
-            style={{
-              background: "rgba(255,255,255,0.03)",
-              border: "1.5px dashed rgba(255,255,255,0.18)",
-              borderRadius: "8px",
-              padding: "20px",
-              textAlign: "center",
-            }}
-          >
+          <div onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}
+            style={{ background: "rgba(255,255,255,0.03)", border: "1.5px dashed rgba(255,255,255,0.18)", borderRadius: "8px", padding: "20px", textAlign: "center" }}>
             <div className="text-3xl mb-3">📷</div>
-            <div className="text-white/60 text-sm font-medium mb-4">Photograph a bottle or any bar ingredient</div>
+            <div className="text-white/60 text-sm font-medium mb-4">Fotografeer een fles of barmateriaal</div>
             <div className="flex gap-2 justify-center">
-              {/* Camera button — opens live camera on mobile */}
-              <button
-                onClick={() => cameraInputRef.current?.click()}
+              <button onClick={() => cameraRef.current?.click()}
                 className="flex items-center gap-2 rounded-md px-4 py-2.5 font-semibold text-black text-sm transition-all active:scale-95"
-                style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}
-              >
-                📸 Camera
-              </button>
-              {/* Gallery / file picker */}
-              <button
-                onClick={() => galleryInputRef.current?.click()}
+                style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}>📸 Camera</button>
+              <button onClick={() => galleryRef.current?.click()}
                 className="flex items-center gap-2 rounded-md px-4 py-2.5 font-semibold text-white/70 text-sm transition-all hover:text-white active:scale-95"
-                style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)" }}
-              >
-                🖼 Upload
-              </button>
+                style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)" }}>🖼 Uploaden</button>
             </div>
-            <div className="text-white/25 text-xs mt-3">Drag & drop also works</div>
+            <div className="text-white/25 text-xs mt-3">Slepen werkt ook</div>
           </div>
-          {/* Camera input — triggers native camera (no gallery) */}
-          <input
-            ref={cameraInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
-          />
-          {/* Gallery input — opens file picker / photo library */}
-          <input
-            ref={galleryInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
-          />
+          <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
+          <input ref={galleryRef} type="file" accept="image/*" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
         </>
       )}
-
       {scanning && (
         <div className="text-center py-6" style={{ background: "rgba(168,85,247,0.08)", border: "1px solid rgba(168,85,247,0.25)", borderRadius: "8px" }}>
           <div className="text-3xl mb-2 animate-bounce">🔍</div>
-          <div className="text-white/70 text-sm">Claude is identifying your ingredients...</div>
-          <button onClick={reset} className="text-white/30 hover:text-white/50 text-xs mt-3 transition-colors">Cancel</button>
+          <div className="text-white/70 text-sm">Claude identificeert je ingrediënten...</div>
+          <button onClick={reset} className="text-white/30 hover:text-white/50 text-xs mt-3 transition-colors">Annuleren</button>
         </div>
       )}
-
       {results && (
         <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "8px", padding: "14px" }}>
           <div className="flex items-center justify-between mb-3">
-            <div className="text-white text-sm font-semibold">Found {results.length} ingredient{results.length !== 1 ? "s" : ""}</div>
-            <button onClick={reset} className="text-white/30 hover:text-white/60 text-xs transition-colors">Clear</button>
+            <div className="text-white text-sm font-semibold">{results.length} ingrediënt{results.length !== 1 ? "en" : ""} gevonden</div>
+            <button onClick={reset} className="text-white/30 hover:text-white/60 text-xs transition-colors">Wissen</button>
           </div>
           <div className="flex flex-col gap-1.5 mb-3">
             {results.map((ing, i) => (
-              <button
-                key={i}
-                onClick={() => setSelected((prev) => { const s = new Set(prev); s.has(i) ? s.delete(i) : s.add(i); return s; })}
+              <button key={i} onClick={() => setSelected((prev) => { const s = new Set(prev); s.has(i) ? s.delete(i) : s.add(i); return s; })}
                 className="flex items-center justify-between rounded-md px-3 py-2 text-left transition-all duration-100"
-                style={{
-                  background: selected.has(i) ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.03)",
-                  border: selected.has(i) ? "1px solid rgba(16,185,129,0.35)" : "1px solid rgba(255,255,255,0.07)",
-                }}
-              >
+                style={{ background: selected.has(i) ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.03)", border: selected.has(i) ? "1px solid rgba(16,185,129,0.35)" : "1px solid rgba(255,255,255,0.07)" }}>
                 <div className="flex items-center gap-2">
                   <div className="w-4 h-4 rounded flex items-center justify-center text-xs flex-shrink-0" style={{ background: selected.has(i) ? "#10b981" : "rgba(255,255,255,0.1)" }}>
                     {selected.has(i) ? "✓" : ""}
@@ -256,27 +315,19 @@ function PhotoScanner({ onAdd }: { onAdd: (name: string, category: string) => vo
                   <span className="text-white text-sm">{ing.name}</span>
                   <span className="text-white/35 text-xs">{CATEGORY_LABELS[ing.category] ?? ing.category}</span>
                 </div>
-                <span className="text-xs font-semibold" style={{ color: CONFIDENCE_COLORS[ing.confidence] }}>
-                  {ing.confidence}
-                </span>
+                <span className="text-xs font-semibold" style={{ color: CONF_COLORS[ing.confidence] }}>{ing.confidence}</span>
               </button>
             ))}
           </div>
           <div className="flex gap-2">
-            <button
-              onClick={handleAddSelected}
-              disabled={selected.size === 0 || adding}
+            <button onClick={handleAddSelected} disabled={selected.size === 0 || adding}
               className="flex-1 rounded-md py-2.5 font-bold text-black text-sm disabled:opacity-50 transition-all"
-              style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)" }}
-            >
-              {adding ? "Adding..." : `Add ${selected.size} selected`}
+              style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)" }}>
+              {adding ? "Toevoegen..." : `${selected.size} geselecteerd toevoegen`}
             </button>
-            <button
-              onClick={reset}
-              className="rounded-md px-3 py-2.5 text-white/50 text-sm hover:text-white transition-colors"
-              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
-            >
-              New photo
+            <button onClick={reset} className="rounded-md px-3 py-2.5 text-white/50 text-sm hover:text-white transition-colors"
+              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              Nieuwe foto
             </button>
           </div>
         </div>
@@ -285,9 +336,11 @@ function PhotoScanner({ onAdd }: { onAdd: (name: string, category: string) => vo
   );
 }
 
+// ── Ingredients tab ──────────────────────────────────────────────────────────
+
 function IngredientsTab() {
   const [search, setSearch] = useState("");
-  const [activeCat, setActiveCat] = useState<string>("all");
+  const [activeCat, setActiveCat] = useState("all");
   const [newName, setNewName] = useState("");
   const [newCat, setNewCat] = useState("spirits");
   const [showAddForm, setShowAddForm] = useState(false);
@@ -295,28 +348,21 @@ function IngredientsTab() {
   const { data: ingredients, refetch } = trpc.admin.getIngredients.useQuery();
   const updateMutation = trpc.admin.updateIngredient.useMutation({ onSuccess: () => refetch() });
   const addMutation = trpc.admin.addIngredient.useMutation({
-    onSuccess: () => { refetch(); setNewName(""); setShowAddForm(false); toast.success("Ingredient added!"); },
+    onSuccess: () => { refetch(); setNewName(""); setShowAddForm(false); toast.success("Ingrediënt toegevoegd!"); },
   });
   const deleteMutation = trpc.admin.deleteIngredient.useMutation({
-    onSuccess: () => { refetch(); toast.success("Ingredient removed."); },
+    onSuccess: () => { refetch(); toast.success("Ingrediënt verwijderd."); },
   });
 
-  const handlePhotoAdd = (name: string, category: string) => {
-    addMutation.mutate({ name, category });
-  };
-
-  const filtered = useMemo(() => {
-    return (ingredients ?? []).filter((i) => {
-      const matchesCat = activeCat === "all" || i.category === activeCat;
-      const matchesSearch = i.name.toLowerCase().includes(search.toLowerCase());
-      return matchesCat && matchesSearch;
-    });
-  }, [ingredients, activeCat, search]);
+  const filtered = useMemo(() => (ingredients ?? []).filter((i) => {
+    const matchesCat = activeCat === "all" || i.category === activeCat;
+    const matchesSearch = i.name.toLowerCase().includes(search.toLowerCase());
+    return matchesCat && matchesSearch;
+  }), [ingredients, activeCat, search]);
 
   const availableCount = (ingredients ?? []).filter((i) => i.available).length;
   const totalCount = (ingredients ?? []).length;
 
-  // Group by category for the grid view
   const grouped = useMemo(() => {
     if (activeCat !== "all") return { [activeCat]: filtered };
     const groups: Record<string, typeof filtered> = {};
@@ -331,95 +377,59 @@ function IngredientsTab() {
 
   return (
     <div className="flex flex-col gap-5">
-      {/* Photo scanner */}
-      <PhotoScanner onAdd={handlePhotoAdd} />
-
-      {/* Stats bar */}
+      <PhotoScanner onAdd={(name, category) => addMutation.mutate({ name, category })} />
       <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-md p-3 text-center" style={{ background: "rgba(16,185,129,0.12)", border: "1px solid rgba(16,185,129,0.25)" }}>
-          <div className="font-display text-2xl font-bold text-white">{availableCount}</div>
-          <div className="text-white/50 text-xs">In stock</div>
-        </div>
-        <div className="rounded-md p-3 text-center" style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.25)" }}>
-          <div className="font-display text-2xl font-bold text-white">{totalCount - availableCount}</div>
-          <div className="text-white/50 text-xs">Out of stock</div>
-        </div>
-        <div className="rounded-md p-3 text-center" style={{ background: "rgba(255,107,53,0.12)", border: "1px solid rgba(255,107,53,0.25)" }}>
-          <div className="font-display text-2xl font-bold text-white">{totalCount}</div>
-          <div className="text-white/50 text-xs">Total</div>
-        </div>
+        {[
+          { val: availableCount, label: "Op voorraad", bg: "rgba(16,185,129,0.12)", border: "rgba(16,185,129,0.25)" },
+          { val: totalCount - availableCount, label: "Niet op voorraad", bg: "rgba(239,68,68,0.12)", border: "rgba(239,68,68,0.25)" },
+          { val: totalCount, label: "Totaal", bg: "rgba(255,107,53,0.12)", border: "rgba(255,107,53,0.25)" },
+        ].map((s) => (
+          <div key={s.label} className="rounded-md p-3 text-center" style={{ background: s.bg, border: `1px solid ${s.border}` }}>
+            <div className="font-display text-2xl font-bold text-white">{s.val}</div>
+            <div className="text-white/50 text-xs">{s.label}</div>
+          </div>
+        ))}
       </div>
-
-      {/* Search */}
       <div className="relative">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30 text-sm">🔍</span>
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search ingredients..."
+        <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Zoek ingrediënten..."
           className="w-full rounded-md pl-9 pr-4 py-2.5 text-white placeholder-white/30 outline-none text-sm"
-          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
-        />
-        {search && (
-          <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/70 text-sm">
-            ✕
-          </button>
-        )}
+          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+        {search && <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/70 text-sm">✕</button>}
       </div>
-
-      {/* Category tabs */}
       <div className="flex gap-1.5 flex-wrap">
         {["all", ...CATEGORIES].map((cat) => {
           const isActive = activeCat === cat;
           const color = cat === "all" ? "#ff6b35" : CATEGORY_COLORS[cat];
           return (
-            <button key={cat} onClick={() => setActiveCat(cat)}
-              className="rounded-md px-3 py-1.5 text-xs font-semibold transition-all duration-150"
-              style={{
-                background: isActive ? `${color}25` : "rgba(255,255,255,0.05)",
-                border: isActive ? `1.5px solid ${color}` : "1px solid rgba(255,255,255,0.08)",
-                color: isActive ? color : "rgba(255,255,255,0.5)",
-              }}>
-              {cat === "all" ? `All (${totalCount})` : CATEGORY_LABELS[cat]}
+            <button key={cat} onClick={() => setActiveCat(cat)} className="rounded-md px-3 py-1.5 text-xs font-semibold transition-all duration-150"
+              style={{ background: isActive ? `${color}25` : "rgba(255,255,255,0.05)", border: isActive ? `1.5px solid ${color}` : "1px solid rgba(255,255,255,0.08)", color: isActive ? color : "rgba(255,255,255,0.5)" }}>
+              {cat === "all" ? `Alles (${totalCount})` : CATEGORY_LABELS[cat]}
             </button>
           );
         })}
       </div>
-
-      {/* Ingredient grid grouped by category */}
       {Object.keys(grouped).length === 0 ? (
-        <div className="text-center py-8 text-white/30 text-sm">No ingredients match your search.</div>
+        <div className="text-center py-8 text-white/30 text-sm">Geen ingrediënten gevonden.</div>
       ) : (
         Object.entries(grouped).map(([cat, items]) => (
           <div key={cat}>
             <div className="flex items-center gap-2 mb-2">
               <div className="w-2 h-2 rounded-full" style={{ background: CATEGORY_COLORS[cat] ?? "#94a3b8" }} />
-              <span className="text-white/60 text-xs font-semibold uppercase tracking-wider">
-                {CATEGORY_LABELS[cat] ?? cat} ({items.length})
-              </span>
+              <span className="text-white/60 text-xs font-semibold uppercase tracking-wider">{CATEGORY_LABELS[cat] ?? cat} ({items.length})</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               {items.map((ing) => (
-                <div key={ing.id}
-                  className="flex items-center justify-between rounded-md px-3 py-2.5 group"
-                  style={{
-                    background: ing.available ? "rgba(16,185,129,0.06)" : "rgba(255,255,255,0.03)",
-                    border: ing.available ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(255,255,255,0.06)",
-                  }}>
+                <div key={ing.id} className="flex items-center justify-between rounded-md px-3 py-2.5 group"
+                  style={{ background: ing.available ? "rgba(16,185,129,0.06)" : "rgba(255,255,255,0.03)", border: ing.available ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(255,255,255,0.06)" }}>
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <IngredientToggle
-                      available={ing.available}
-                      onChange={() => updateMutation.mutate({ id: ing.id, available: !ing.available })}
-                    />
-                    <span className={`text-sm truncate ${ing.available ? "text-white" : "text-white/40 line-through"}`}>
-                      {ing.name}
-                    </span>
+                    <IngredientToggle available={ing.available} onChange={() => updateMutation.mutate({ id: ing.id, available: !ing.available })} />
+                    <span className={`text-sm truncate ${ing.available ? "text-white" : "text-white/40 line-through"}`}>{ing.name}</span>
                   </div>
                   {ing.isCustom && (
                     <button onClick={() => deleteMutation.mutate({ id: ing.id })}
                       className="text-red-400/40 hover:text-red-400 text-xs transition-colors ml-2 flex-shrink-0 opacity-0 group-hover:opacity-100">
-                      Remove
+                      Verwijder
                     </button>
                   )}
                 </div>
@@ -428,27 +438,16 @@ function IngredientsTab() {
           </div>
         ))
       )}
-
-      {/* Add custom ingredient */}
       <div className="border-t border-white/8 pt-4">
         {showAddForm ? (
           <div className="rounded-md p-4" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }}>
-            <div className="text-white font-semibold text-sm mb-3">Add custom ingredient</div>
-            <input
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="Ingredient name..."
+            <div className="text-white font-semibold text-sm mb-3">Eigen ingrediënt toevoegen</div>
+            <input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Naam ingrediënt..."
               className="w-full rounded-md px-3 py-2.5 text-white placeholder-white/30 outline-none mb-2 text-sm"
-              style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)" }}
-              autoFocus
-            />
-            <select
-              value={newCat}
-              onChange={(e) => setNewCat(e.target.value)}
+              style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)" }} autoFocus />
+            <select value={newCat} onChange={(e) => setNewCat(e.target.value)}
               className="w-full rounded-md px-3 py-2.5 text-white outline-none mb-3 text-sm"
-              style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)" }}
-            >
+              style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)" }}>
               {CATEGORIES.map((c) => <option key={c} value={c} style={{ background: "#0d0d1a" }}>{CATEGORY_LABELS[c]}</option>)}
             </select>
             <div className="flex gap-2">
@@ -456,12 +455,12 @@ function IngredientsTab() {
                 disabled={!newName.trim() || addMutation.isPending}
                 className="flex-1 rounded-md py-2.5 font-bold text-black text-sm disabled:opacity-50"
                 style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}>
-                {addMutation.isPending ? "Adding..." : "Add Ingredient"}
+                {addMutation.isPending ? "Toevoegen..." : "Toevoegen"}
               </button>
               <button onClick={() => setShowAddForm(false)}
                 className="rounded-md px-4 py-2.5 text-white/50 text-sm hover:text-white transition-colors"
                 style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
-                Cancel
+                Annuleren
               </button>
             </div>
           </div>
@@ -469,7 +468,7 @@ function IngredientsTab() {
           <button onClick={() => setShowAddForm(true)}
             className="w-full rounded-md py-2.5 font-semibold text-white/50 text-sm transition-all duration-150 hover:text-white hover:border-white/30"
             style={{ background: "rgba(255,255,255,0.03)", border: "1.5px dashed rgba(255,255,255,0.15)" }}>
-            + Add custom ingredient
+            + Eigen ingrediënt toevoegen
           </button>
         )}
       </div>
@@ -477,104 +476,173 @@ function IngredientsTab() {
   );
 }
 
-function SessionsTab() {
+// ── Orders tab ───────────────────────────────────────────────────────────────
+
+type AdminRecipe = {
+  name: string;
+  colorHex: string;
+  tagline?: string;
+  spiritBase?: string;
+  ingredients: Array<{ name: string; amount: number; unit: string }>;
+  instructions: string[];
+  flavorNotes?: string[];
+  profileExplanation?: string;
+};
+
+function OrdersTab() {
   const { data: sessions } = trpc.admin.getSessions.useQuery();
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [servedIds, setServedIds] = useState<Set<number>>(new Set());
+  const [activeRecipeIdx, setActiveRecipeIdx] = useState(0);
   const [search, setSearch] = useState("");
 
-  const filtered = useMemo(() => {
-    return (sessions ?? []).filter((s) =>
-      (s.guestName ?? "").toLowerCase().includes(search.toLowerCase())
+  const filtered = useMemo(() =>
+    (sessions ?? []).filter((s) => (s.guestName ?? "").toLowerCase().includes(search.toLowerCase())),
+    [sessions, search]
+  );
+
+  const selectedSession = sessions?.find((s) => s.id === selectedId);
+
+  if (selectedSession) {
+    const recipes = selectedSession.recipes as AdminRecipe[] | null;
+    const recipe = recipes?.[activeRecipeIdx];
+    const isServed = servedIds.has(selectedSession.id);
+
+    return (
+      <div>
+        <button onClick={() => { setSelectedId(null); setActiveRecipeIdx(0); }}
+          className="flex items-center gap-2 text-white/50 hover:text-white text-sm mb-5 transition-colors">
+          ← Terug naar bestellingen
+        </button>
+
+        <div className="mb-5">
+          <h3 className="font-display text-xl font-bold text-white">{selectedSession.guestName ?? "Anoniem"}</h3>
+          <p className="text-white/40 text-xs mt-0.5">
+            {new Date(selectedSession.createdAt).toLocaleDateString("nl-NL")} om{" "}
+            {new Date(selectedSession.createdAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" })}
+          </p>
+        </div>
+
+        {recipes && recipes.length > 1 && (
+          <div className="mb-4">
+            <div className="text-white/40 text-xs uppercase tracking-wider mb-2">Cocktailkeuze</div>
+            <div className="flex flex-col gap-2">
+              {recipes.map((r, i) => (
+                <button key={i} onClick={() => setActiveRecipeIdx(i)}
+                  className="flex items-center gap-3 rounded-md px-4 py-3 text-left transition-all"
+                  style={{ background: i === activeRecipeIdx ? `${r.colorHex}20` : "rgba(255,255,255,0.04)", border: i === activeRecipeIdx ? `1.5px solid ${r.colorHex}` : "1px solid rgba(255,255,255,0.08)" }}>
+                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: r.colorHex }} />
+                  <span className="text-white text-sm font-medium">{r.name}</span>
+                  {i === activeRecipeIdx && <span className="ml-auto text-xs font-semibold" style={{ color: r.colorHex }}>Geselecteerd</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {recipe && (
+          <>
+            <div className="rounded-md p-4 mb-4" style={{ background: `${recipe.colorHex}18`, border: `1.5px solid ${recipe.colorHex}40` }}>
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full flex-shrink-0" style={{ background: recipe.colorHex, boxShadow: `0 0 14px ${recipe.colorHex}66` }} />
+                <div>
+                  <div className="font-display text-xl font-bold text-white">{recipe.name}</div>
+                  {recipe.tagline && <div className="text-white/50 text-xs mt-0.5">{recipe.tagline}</div>}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-md p-4 mb-4" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              <div className="text-white/40 text-xs uppercase tracking-wider mb-3">🧪 Ingrediënten</div>
+              <div className="flex flex-col gap-2">
+                {(recipe.ingredients ?? []).map((ing, i) => (
+                  <div key={i} className="flex items-center justify-between rounded-md px-3.5 py-2.5"
+                    style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)" }}>
+                    <span className="text-white text-sm font-medium">{ing.name}</span>
+                    <span className="font-bold text-sm" style={{ color: recipe.colorHex }}>{ing.amount} {ing.unit}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-md p-4 mb-5" style={{ background: "rgba(255,255,255,0.04)", border: `1.5px solid ${recipe.colorHex}30` }}>
+              <div className="text-white/40 text-xs uppercase tracking-wider mb-3">🍸 Hoe maak je het</div>
+              <div className="flex flex-col gap-3">
+                {(recipe.instructions ?? []).map((step, i) => (
+                  <div key={i} className="flex gap-3 items-start">
+                    <div className="w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center text-sm font-bold text-black"
+                      style={{ background: recipe.colorHex, marginTop: "1px" }}>
+                      {i + 1}
+                    </div>
+                    <p className="text-white/85 text-sm leading-relaxed pt-1">{step}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {isServed ? (
+              <div className="rounded-md p-5 text-center" style={{ background: "rgba(16,185,129,0.1)", border: "2px solid rgba(16,185,129,0.4)" }}>
+                <div className="text-3xl mb-2">✅</div>
+                <div className="font-bold text-white text-lg">Geserveerd!</div>
+                <p className="text-white/50 text-xs mt-1">Cocktail is aan de gast overhandigd.</p>
+              </div>
+            ) : (
+              <button onClick={() => setServedIds((prev) => { const s = new Set(prev); s.add(selectedSession.id); return s; })}
+                className="w-full rounded-md py-4 text-lg font-bold text-white transition-all duration-200 active:scale-95"
+                style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)", boxShadow: "0 0 32px rgba(16,185,129,0.4)" }}>
+                ✓ Markeer als geserveerd
+              </button>
+            )}
+          </>
+        )}
+      </div>
     );
-  }, [sessions, search]);
+  }
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <span className="text-white/50 text-sm">{(sessions ?? []).length} total sessions</span>
+        <span className="text-white/50 text-sm">{(sessions ?? []).length} bestellingen</span>
         <div className="relative">
           <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30 text-xs">🔍</span>
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name..."
+          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Zoek op naam..."
             className="rounded-md pl-7 pr-3 py-2 text-white placeholder-white/30 outline-none text-xs"
-            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", width: "160px" }}
-          />
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", width: "160px" }} />
         </div>
       </div>
       <div className="flex flex-col gap-2">
         {filtered.map((session) => {
-          const recipes = session.recipes as Array<{ name: string; colorHex: string }> | null;
-          const answers = session.answers as Array<{ question: string; answer: string }> | null;
-          const isExpanded = expandedId === session.id;
-
+          const recipes = session.recipes as AdminRecipe[] | null;
+          const isServed = servedIds.has(session.id);
           return (
-            <div key={session.id} className="rounded-md overflow-hidden"
+            <button key={session.id} onClick={() => { setSelectedId(session.id); setActiveRecipeIdx(0); }}
+              className="w-full rounded-md overflow-hidden text-left transition-all duration-150 hover:border-white/20 active:scale-99"
               style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <button onClick={() => setExpandedId(isExpanded ? null : session.id)}
-                className="w-full flex items-center justify-between px-4 py-3 text-left">
+              <div className="flex items-center justify-between px-4 py-3.5">
                 <div>
-                  <div className="text-white font-semibold text-sm">{session.guestName ?? "Anonymous"}</div>
-                  <div className="text-white/40 text-xs">
-                    {new Date(session.createdAt).toLocaleDateString()} at {new Date(session.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  <div className="text-white font-semibold text-sm">{session.guestName ?? "Anoniem"}</div>
+                  <div className="text-white/40 text-xs mt-0.5">
+                    {new Date(session.createdAt).toLocaleDateString("nl-NL")} om{" "}
+                    {new Date(session.createdAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" })}
+                    {recipes?.[0]?.name && <span className="ml-2 text-white/30">· {recipes[0].name}</span>}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {session.completed && (
-                    <span className="text-xs rounded px-2 py-0.5 font-semibold"
-                      style={{ background: "rgba(16,185,129,0.2)", color: "#10b981" }}>
-                      Done
-                    </span>
-                  )}
-                  {session.webhookSent && (
-                    <span className="text-xs rounded px-2 py-0.5 font-semibold"
-                      style={{ background: "rgba(34,211,238,0.2)", color: "#22d3ee" }}>
-                      Sent
-                    </span>
-                  )}
-                  <span className="text-white/30 text-xs">{isExpanded ? "▲" : "▼"}</span>
+                  {isServed ? (
+                    <span className="text-xs rounded px-2 py-0.5 font-semibold" style={{ background: "rgba(16,185,129,0.2)", color: "#10b981" }}>✓ Geserveerd</span>
+                  ) : session.completed ? (
+                    <span className="text-xs rounded px-2 py-0.5 font-semibold" style={{ background: "rgba(255,107,53,0.2)", color: "#ff6b35" }}>Besteld</span>
+                  ) : null}
+                  <span className="text-white/30 text-sm">→</span>
                 </div>
-              </button>
-
-              {isExpanded && (
-                <div className="px-4 pb-4 border-t border-white/5 pt-3 space-y-3">
-                  {recipes && recipes.length > 0 && (
-                    <div>
-                      <div className="text-white/40 text-xs uppercase tracking-wider mb-2">Generated cocktails</div>
-                      <div className="flex flex-col gap-1">
-                        {recipes.map((r, i) => (
-                          <div key={i} className="flex items-center gap-2">
-                            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: r.colorHex }} />
-                            <span className="text-white/70 text-sm">{r.name}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  {answers && answers.length > 0 && (
-                    <div>
-                      <div className="text-white/40 text-xs uppercase tracking-wider mb-2">Quiz answers</div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                        {answers.map((a, i) => (
-                          <div key={i} className="rounded px-3 py-2" style={{ background: "rgba(255,255,255,0.04)" }}>
-                            <div className="text-white/40 text-xs leading-tight">{a.question}</div>
-                            <div className="text-white/80 text-sm capitalize font-medium">{a.answer.replace(/_/g, " ")}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+              </div>
+            </button>
           );
         })}
         {filtered.length === 0 && (
           <div className="text-center py-12 text-white/30">
-            <div className="text-4xl mb-3">📊</div>
-            <p>No quiz sessions yet.</p>
+            <div className="text-4xl mb-3">🍹</div>
+            <p>Nog geen bestellingen.</p>
           </div>
         )}
       </div>
@@ -582,14 +650,326 @@ function SessionsTab() {
   );
 }
 
+// ── QR Codes tab ─────────────────────────────────────────────────────────────
+
+const GRAD_PREVIEWS = [
+  "linear-gradient(135deg,#ff9a00,#ff3cac,#9b59b6)",
+  "linear-gradient(135deg,#ff9a00,#ff6b35,#ff3cac,#c800ff,#7b2fff)",
+  "conic-gradient(from 0deg,#ff9a00,#ff3cac,#9b59b6,#3b82f6,#ff9a00)",
+  "radial-gradient(circle at 30% 30%,#ff9a00,#ff3cac,#9b59b6)",
+];
+
+function QRCodesTab() {
+  const [url, setUrl] = useState("https://cocktailored.ai");
+  const [selectedGrad, setSelectedGrad] = useState(0);
+  const [logoName, setLogoName] = useState("");
+  const [logoSize, setLogoSize] = useState(20);
+  const [qrSize, setQrSize] = useState(300);
+  const [generating, setGenerating] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [cardDataUrl, setCardDataUrl] = useState<string | null>(null);
+  const [view, setView] = useState<"generator" | "stickers">("generator");
+  const [stickerQty, setStickerQty] = useState(5);
+  const [contactName, setContactName] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactAddress, setContactAddress] = useState("");
+  const [ordering, setOrdering] = useState(false);
+  const [orderDone, setOrderDone] = useState(false);
+
+  const logoImageRef = useRef<HTMLImageElement | null>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const scriptLoadedRef = useRef(false);
+
+  useEffect(() => {
+    if ((window as any).QRCode) { scriptLoadedRef.current = true; return; }
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
+    s.onload = () => { scriptLoadedRef.current = true; };
+    document.head.appendChild(s);
+  }, []);
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLogoName(file.name);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => { logoImageRef.current = img; };
+      img.src = ev.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const generateQR = async () => {
+    if (!url.trim() || generating) return;
+    if (!(window as any).QRCode) { toast.error("QR bibliotheek laden... probeer opnieuw."); return; }
+    setGenerating(true);
+    try {
+      const tmp = document.createElement("div");
+      tmp.style.cssText = "position:absolute;left:-9999px;top:-9999px;";
+      document.body.appendChild(tmp);
+      new (window as any).QRCode(tmp, { text: url, width: qrSize, height: qrSize, colorDark: "#000000", colorLight: "#ffffff", correctLevel: (window as any).QRCode.CorrectLevel.H });
+      await new Promise((r) => setTimeout(r, 150));
+      const src = tmp.querySelector("img") || tmp.querySelector("canvas");
+      if (!src) { document.body.removeChild(tmp); setGenerating(false); return; }
+      const getUrl = (el: Element) => el instanceof HTMLCanvasElement ? el.toDataURL() : (el as HTMLImageElement).src;
+      const qrImg = new Image();
+      qrImg.onload = () => {
+        document.body.removeChild(tmp);
+        const styled = applyGradientToQR(qrImg, selectedGrad, qrSize);
+        if (logoImageRef.current) {
+          const ctx = styled.getContext("2d")!;
+          const ls = qrSize * (logoSize / 100);
+          const lx = (qrSize - ls) / 2, ly = (qrSize - ls) / 2;
+          const pad = ls * 0.15, bs = ls + pad * 2, bx = lx - pad, by = ly - pad;
+          ctx.fillStyle = "#0d0d0d";
+          ctx.beginPath();
+          if (ctx.roundRect) ctx.roundRect(bx, by, bs, bs, 10); else ctx.rect(bx, by, bs, bs);
+          ctx.fill();
+          ctx.save();
+          ctx.beginPath();
+          if (ctx.roundRect) ctx.roundRect(bx, by, bs, bs, 10); else ctx.rect(bx, by, bs, bs);
+          ctx.clip();
+          ctx.drawImage(logoImageRef.current, lx, ly, ls, ls);
+          ctx.restore();
+        }
+        qrCanvasRef.current = styled;
+        setQrDataUrl(styled.toDataURL("image/png"));
+        const card = buildCardCanvas(styled);
+        setCardDataUrl(card.toDataURL("image/png"));
+        setGenerating(false);
+      };
+      qrImg.src = getUrl(src);
+    } catch {
+      toast.error("Kon QR code niet genereren.");
+      setGenerating(false);
+    }
+  };
+
+  const downloadQR = () => {
+    if (!qrDataUrl) return;
+    const a = document.createElement("a"); a.download = "cocktailored-qr.png"; a.href = qrDataUrl; a.click();
+  };
+
+  const downloadCard = () => {
+    if (!cardDataUrl) return;
+    const a = document.createElement("a"); a.download = "cocktailored-kaartje.png"; a.href = cardDataUrl; a.click();
+  };
+
+  const downloadPDF = () => {
+    if (!cardDataUrl) return;
+    const win = window.open("", "_blank");
+    if (!win) return;
+    win.document.write(`<!DOCTYPE html><html><head><title>Cocktailored QR Kaartje</title><style>body{margin:0;padding:20px;background:#fff;display:flex;justify-content:center;align-items:center;min-height:100vh}img{width:90mm;height:90mm}@media print{body{padding:0}img{width:100%;height:auto}}</style></head><body><img src="${cardDataUrl}"/><script>window.onload=function(){window.print()}<\/script></body></html>`);
+    win.document.close();
+  };
+
+  const placeOrder = async () => {
+    if (!contactName.trim() || !contactEmail.trim() || !contactAddress.trim()) {
+      toast.error("Vul alle velden in."); return;
+    }
+    setOrdering(true);
+    await new Promise((r) => setTimeout(r, 2200));
+    setOrderDone(true);
+    setOrdering(false);
+  };
+
+  const stickerPrice = (stickerQty / 5) * 10;
+
+  if (view === "stickers") {
+    return (
+      <div>
+        <button onClick={() => { setView("generator"); setOrderDone(false); }}
+          className="flex items-center gap-2 text-white/50 hover:text-white text-sm mb-5 transition-colors">
+          ← Terug naar generator
+        </button>
+
+        {orderDone ? (
+          <div className="flex flex-col items-center text-center py-8">
+            <div className="text-6xl mb-4">🎉</div>
+            <h3 className="font-display text-2xl font-bold text-white mb-2">Bestelling geplaatst!</h3>
+            <p className="text-white/60 mb-1">Je {stickerQty} QR stickers worden vers gedrukt en verstuurd.</p>
+            <p className="text-white/40 text-sm">Verwachte levertijd: 3–5 werkdagen.</p>
+            <div className="mt-6 rounded-md p-4 text-left w-full max-w-sm" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+              <div className="text-white/40 text-xs uppercase tracking-wider mb-2">Samenvatting</div>
+              <div className="flex justify-between text-sm mb-1"><span className="text-white/60">Stickers</span><span className="text-white font-bold">{stickerQty}x</span></div>
+              <div className="flex justify-between text-sm mb-1"><span className="text-white/60">Prijs per 5</span><span className="text-white">€10,00</span></div>
+              <div className="flex justify-between text-sm border-t border-white/10 pt-2 mt-2"><span className="text-white font-semibold">Totaal</span><span className="font-bold" style={{ color: "#ff6b35" }}>€{stickerPrice.toFixed(2)}</span></div>
+            </div>
+            <button onClick={() => { setOrderDone(false); setView("generator"); }}
+              className="mt-5 text-white/30 hover:text-white/60 text-sm underline transition-colors">
+              Nieuwe bestelling
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-4">
+            <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
+              <div className="font-semibold text-white mb-1">Aantal stickers</div>
+              <p className="text-white/40 text-xs mb-3">We verkopen stickers per 5 voor €10,00.</p>
+              <div className="flex gap-2 flex-wrap mb-3">
+                {[5, 10, 15, 20, 25, 50].map((qty) => (
+                  <button key={qty} onClick={() => setStickerQty(qty)}
+                    className="rounded-md px-4 py-2 text-sm font-bold transition-all"
+                    style={{ background: stickerQty === qty ? "rgba(255,107,53,0.25)" : "rgba(255,255,255,0.06)", border: stickerQty === qty ? "1.5px solid #ff6b35" : "1px solid rgba(255,255,255,0.1)", color: stickerQty === qty ? "#ff6b35" : "rgba(255,255,255,0.6)" }}>
+                    {qty}x
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center justify-between rounded-md px-4 py-3" style={{ background: "rgba(255,107,53,0.1)", border: "1px solid rgba(255,107,53,0.25)" }}>
+                <span className="text-white/60 text-sm">{stickerQty} stickers</span>
+                <span className="font-display text-xl font-bold" style={{ color: "#ff6b35" }}>€{stickerPrice.toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
+              <div className="font-semibold text-white mb-3">Leveringsgegevens</div>
+              {[
+                { label: "Naam", value: contactName, set: setContactName, placeholder: "Jouw naam" },
+                { label: "E-mailadres", value: contactEmail, set: setContactEmail, placeholder: "jouw@email.com" },
+                { label: "Adres", value: contactAddress, set: setContactAddress, placeholder: "Straat, stad, land" },
+              ].map((f) => (
+                <div key={f.label} className="mb-3">
+                  <label className="block text-white/50 text-xs uppercase tracking-wider mb-1">{f.label}</label>
+                  <input type="text" value={f.value} onChange={(e) => f.set(e.target.value)} placeholder={f.placeholder}
+                    className="w-full rounded-md px-3 py-2.5 text-white placeholder-white/25 outline-none text-sm"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+              ))}
+            </div>
+
+            <button onClick={placeOrder} disabled={ordering}
+              className="w-full rounded-md py-4 text-lg font-bold text-black transition-all duration-200 active:scale-95 disabled:opacity-60"
+              style={{ background: "linear-gradient(135deg, #ff9a00, #ff3cac)", boxShadow: "0 0 32px rgba(255,154,0,0.4)" }}>
+              {ordering ? (
+                <span className="flex items-center justify-center gap-3">
+                  <span className="inline-block w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+                  Bestelling verwerken...
+                </span>
+              ) : `Bestel ${stickerQty} stickers — €${stickerPrice.toFixed(2)}`}
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
+        <div className="font-semibold text-white mb-4">QR code generator</div>
+
+        <div className="mb-4">
+          <label className="block text-white/50 text-xs uppercase tracking-wider mb-1.5">URL of tekst</label>
+          <input type="text" value={url} onChange={(e) => setUrl(e.target.value)}
+            className="w-full rounded-md px-3 py-2.5 text-white placeholder-white/30 outline-none text-sm"
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+            placeholder="https://jouw-link.com" />
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-white/50 text-xs uppercase tracking-wider mb-2">Gradient stijl</label>
+          <div className="flex gap-2">
+            {GRAD_PREVIEWS.map((grad, i) => (
+              <button key={i} onClick={() => setSelectedGrad(i)}
+                className="flex-1 h-7 rounded-md transition-all"
+                style={{ background: grad, border: selectedGrad === i ? "2px solid #fff" : "2px solid transparent", outline: selectedGrad === i ? "2px solid rgba(255,255,255,0.3)" : "none", outlineOffset: "2px" }} />
+            ))}
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <label className="block text-white/50 text-xs uppercase tracking-wider mb-1.5">Logo in het midden (optioneel)</label>
+          <button onClick={() => logoInputRef.current?.click()}
+            className="w-full rounded-md px-4 py-2.5 text-sm text-left transition-all"
+            style={{ background: "rgba(255,255,255,0.04)", border: "1.5px dashed rgba(255,255,255,0.18)" }}>
+            <span className="text-white/40">{logoName || "Klik om een logo te uploaden"}</span>
+          </button>
+          <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
+        </div>
+
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-white/50 text-xs uppercase tracking-wider">Logo grootte</label>
+            <span className="text-white/35 text-xs">{logoSize}%</span>
+          </div>
+          <input type="range" min={10} max={32} value={logoSize} onChange={(e) => setLogoSize(Number(e.target.value))}
+            className="w-full" style={{ accentColor: "#ff9a00" }} />
+        </div>
+
+        <div className="mb-5">
+          <label className="block text-white/50 text-xs uppercase tracking-wider mb-1.5">QR formaat</label>
+          <select value={qrSize} onChange={(e) => setQrSize(Number(e.target.value))}
+            className="w-full rounded-md px-3 py-2.5 text-white outline-none text-sm"
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}>
+            <option value={200} style={{ background: "#0d0d1a" }}>Klein — 200px</option>
+            <option value={300} style={{ background: "#0d0d1a" }}>Normaal — 300px</option>
+            <option value={400} style={{ background: "#0d0d1a" }}>Groot — 400px</option>
+            <option value={600} style={{ background: "#0d0d1a" }}>Extra groot — 600px</option>
+          </select>
+        </div>
+
+        <button onClick={generateQR} disabled={generating || !url.trim()}
+          className="w-full rounded-md py-3 font-bold text-white text-sm uppercase tracking-wider disabled:opacity-60 transition-all active:scale-95"
+          style={{ background: "linear-gradient(135deg, #ff9a00, #ff3cac, #9b59b6)" }}>
+          {generating ? "Genereren..." : "Genereer QR code"}
+        </button>
+      </div>
+
+      {qrDataUrl && (
+        <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
+          <div className="font-semibold text-white mb-4">Voorbeeld</div>
+          <div className="flex flex-col items-center gap-4">
+            <img src={qrDataUrl} alt="QR code" className="rounded-lg" style={{ width: Math.min(qrSize, 280), height: Math.min(qrSize, 280), imageRendering: "pixelated" }} />
+            {cardDataUrl && (
+              <img src={cardDataUrl} alt="Cocktailored kaartje" className="rounded-xl w-full max-w-xs" />
+            )}
+            <div className="flex gap-2 flex-wrap justify-center w-full">
+              <button onClick={downloadQR} className="rounded-md px-4 py-2 text-sm font-semibold text-white/70 hover:text-white transition-all"
+                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)" }}>
+                📥 QR (PNG)
+              </button>
+              <button onClick={downloadCard} className="rounded-md px-4 py-2 text-sm font-semibold text-white/70 hover:text-white transition-all"
+                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)" }}>
+                🎴 Kaartje (PNG)
+              </button>
+              <button onClick={downloadPDF} className="rounded-md px-4 py-2 text-sm font-semibold text-black transition-all active:scale-95"
+                style={{ background: "linear-gradient(135deg, #ff9a00, #ff3cac)" }}>
+                🖨 Afdrukken (PDF)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <button onClick={() => setView("stickers")}
+        className="w-full rounded-md p-4 text-left transition-all duration-150 hover:border-white/20 active:scale-99"
+        style={{ background: "rgba(255,154,0,0.06)", border: "1.5px solid rgba(255,154,0,0.25)" }}>
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="font-semibold text-white flex items-center gap-2">
+              🏷 QR stickers bestellen
+              <span className="text-xs rounded px-2 py-0.5 font-bold" style={{ background: "rgba(255,154,0,0.2)", color: "#ff9a00" }}>NIEUW</span>
+            </div>
+            <p className="text-white/40 text-xs mt-0.5">Professioneel gedrukte stickers — €10 per 5 stuks. Klaar voor de bar.</p>
+          </div>
+          <span className="text-white/40 text-sm">→</span>
+        </div>
+      </button>
+    </div>
+  );
+}
+
+// ── Settings tab ─────────────────────────────────────────────────────────────
+
 function SettingsTab() {
   const { data: settings, refetch } = trpc.admin.getSettings.useQuery();
   const updateMutation = trpc.admin.updateSetting.useMutation({
-    onSuccess: () => { refetch(); toast.success("Saved!"); },
+    onSuccess: () => { refetch(); toast.success("Opgeslagen!"); },
   });
-
   const [whatsapp, setWhatsapp] = useState("");
-
   useEffect(() => {
     if (settings) {
       const wa = settings.find((s) => s.key === "whatsapp_number");
@@ -600,71 +980,66 @@ function SettingsTab() {
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
-        <div className="text-white font-semibold mb-1">WhatsApp Number</div>
-        <p className="text-white/40 text-xs mb-3">Bartender's number for order notifications.</p>
-        <input
-          type="text"
-          value={whatsapp}
-          onChange={(e) => setWhatsapp(e.target.value)}
+        <div className="text-white font-semibold mb-1">WhatsApp Nummer</div>
+        <p className="text-white/40 text-xs mb-3">Nummer van de barman voor bestellingsmeldingen.</p>
+        <input type="text" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)}
           className="w-full rounded-md px-3 py-2.5 text-white placeholder-white/30 outline-none mb-3 text-sm"
-          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
-          placeholder="+32..."
-        />
+          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} placeholder="+32..." />
         <button onClick={() => updateMutation.mutate({ key: "whatsapp_number", value: whatsapp })}
           disabled={updateMutation.isPending}
           className="rounded-md px-4 py-2 font-bold text-black text-sm disabled:opacity-50"
           style={{ background: "linear-gradient(135deg, #a855f7, #22d3ee)" }}>
-          {updateMutation.isPending ? "Saving..." : "Save Number"}
+          {updateMutation.isPending ? "Opslaan..." : "Opslaan"}
         </button>
       </div>
-
       <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
-        <div className="text-white font-semibold mb-2">System info</div>
+        <div className="text-white font-semibold mb-2">Systeeminformatie</div>
         <div className="text-white/40 text-xs space-y-1">
-          <p>Bar: The Beast Bar, Indonesia</p>
+          <p>Bar: The Beast Bar, Indonesië</p>
           <p>AI model: Claude by Anthropic</p>
-          <p>Flavor model: 15-principle psychology</p>
-          <p>Measurements: milliliters only</p>
+          <p>Smaakmodel: 15-principe psychologie</p>
+          <p>Maten: milliliters</p>
         </div>
       </div>
     </div>
   );
 }
 
+// ── Admin shell ───────────────────────────────────────────────────────────────
+
 export default function Admin() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeTab, setActiveTab] = useState<AdminTab>("ingredients");
   const logoutMutation = trpc.admin.logout.useMutation({ onSuccess: () => setIsLoggedIn(false) });
   const { data: authData } = trpc.admin.checkAuth.useQuery();
+  useEffect(() => { if (authData?.authenticated) setIsLoggedIn(true); }, [authData]);
 
-  useEffect(() => {
-    if (authData?.authenticated) setIsLoggedIn(true);
-  }, [authData]);
-
-  if (!isLoggedIn) {
-    return <LoginPage onLogin={() => setIsLoggedIn(true)} />;
-  }
+  if (!isLoggedIn) return <LoginPage onLogin={() => setIsLoggedIn(true)} />;
 
   const tabs: { id: AdminTab; label: string; icon: string }[] = [
-    { id: "ingredients", label: "Ingredients", icon: "🍹" },
-    { id: "sessions", label: "Sessions", icon: "📊" },
-    { id: "settings", label: "Settings", icon: "⚙️" },
+    { id: "ingredients", label: "Ingrediënten", icon: "🍹" },
+    { id: "orders", label: "Bestellingen", icon: "📋" },
+    { id: "qrcodes", label: "QR Codes", icon: "⬛" },
+    { id: "settings", label: "Instellingen", icon: "⚙️" },
   ];
+
+  const tabDesc: Record<AdminTab, string> = {
+    ingredients: "Schakel in/uit wat op voorraad is. Claude gebruikt alleen beschikbare ingrediënten.",
+    orders: "Alle bestellingen en gegenereerde cocktails.",
+    qrcodes: "Genereer en download QR codes voor jouw bar.",
+    settings: "Meldingsinstellingen.",
+  };
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Sidebar layout for desktop, top nav for mobile */}
       <div className="flex h-screen overflow-hidden">
-        {/* Sidebar (desktop) */}
-        <aside className="hidden sm:flex flex-col w-56 flex-shrink-0 border-r border-white/8"
-          style={{ background: "rgba(255,255,255,0.02)" }}>
+        <aside className="hidden sm:flex flex-col w-56 flex-shrink-0 border-r border-white/8" style={{ background: "rgba(255,255,255,0.02)" }}>
           <div className="px-5 py-5 border-b border-white/8">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-md flex items-center justify-center text-lg"
-                style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}>🍹</div>
+              <div className="w-8 h-8 rounded-md flex items-center justify-center text-lg" style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}>🍹</div>
               <div>
                 <div className="font-display text-sm font-bold text-white">Beast Bar</div>
-                <div className="text-white/40 text-xs">Admin Panel</div>
+                <div className="text-white/40 text-xs">Beheer</div>
               </div>
             </div>
           </div>
@@ -672,13 +1047,8 @@ export default function Admin() {
             {tabs.map((tab) => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-all duration-150 text-left"
-                style={{
-                  background: activeTab === tab.id ? "rgba(255,107,53,0.15)" : "transparent",
-                  color: activeTab === tab.id ? "#ff6b35" : "rgba(255,255,255,0.5)",
-                  border: activeTab === tab.id ? "1px solid rgba(255,107,53,0.3)" : "1px solid transparent",
-                }}>
-                <span>{tab.icon}</span>
-                {tab.label}
+                style={{ background: activeTab === tab.id ? "rgba(255,107,53,0.15)" : "transparent", color: activeTab === tab.id ? "#ff6b35" : "rgba(255,255,255,0.5)", border: activeTab === tab.id ? "1px solid rgba(255,107,53,0.3)" : "1px solid transparent" }}>
+                <span>{tab.icon}</span>{tab.label}
               </button>
             ))}
           </nav>
@@ -686,58 +1056,42 @@ export default function Admin() {
             <button onClick={() => logoutMutation.mutate()}
               className="w-full flex items-center gap-2 px-3 py-2.5 rounded-md text-sm text-white/40 hover:text-white/70 transition-colors"
               style={{ background: "rgba(255,255,255,0.03)" }}>
-              <span>🚪</span> Log out
+              <span>🚪</span> Uitloggen
             </button>
           </div>
         </aside>
 
-        {/* Main content */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Mobile top bar */}
           <div className="sm:hidden sticky top-0 z-20 px-4 py-3 flex items-center justify-between"
             style={{ background: "rgba(9,9,20,0.95)", backdropFilter: "blur(12px)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
             <div className="font-display text-lg font-bold text-white">Beast Bar Admin</div>
-            <button onClick={() => logoutMutation.mutate()}
-              className="rounded-md px-3 py-1.5 text-xs text-white/50 hover:text-white transition-colors"
-              style={{ background: "rgba(255,255,255,0.06)" }}>
-              Log out
+            <button onClick={() => logoutMutation.mutate()} className="rounded-md px-3 py-1.5 text-xs text-white/50 hover:text-white transition-colors" style={{ background: "rgba(255,255,255,0.06)" }}>
+              Uitloggen
             </button>
           </div>
 
-          {/* Mobile tab nav */}
-          <div className="sm:hidden px-4 py-2 border-b border-white/8"
-            style={{ background: "rgba(9,9,20,0.9)" }}>
+          <div className="sm:hidden px-4 py-2 border-b border-white/8" style={{ background: "rgba(9,9,20,0.9)" }}>
             <div className="flex gap-1">
               {tabs.map((tab) => (
                 <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                   className="flex-1 flex items-center justify-center gap-1 rounded-md py-2 text-xs font-semibold transition-all duration-150"
-                  style={{
-                    background: activeTab === tab.id ? "rgba(255,107,53,0.2)" : "transparent",
-                    color: activeTab === tab.id ? "#ff6b35" : "rgba(255,255,255,0.4)",
-                  }}>
+                  style={{ background: activeTab === tab.id ? "rgba(255,107,53,0.2)" : "transparent", color: activeTab === tab.id ? "#ff6b35" : "rgba(255,255,255,0.4)" }}>
                   <span>{tab.icon}</span>
-                  <span>{tab.label}</span>
+                  <span className="hidden xs:inline">{tab.label}</span>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Desktop page header */}
           <div className="hidden sm:block px-6 py-5 border-b border-white/8">
-            <h2 className="font-display text-2xl font-bold text-white">
-              {tabs.find((t) => t.id === activeTab)?.label}
-            </h2>
-            <p className="text-white/40 text-sm mt-0.5">
-              {activeTab === "ingredients" && "Toggle what's in stock. Claude only uses available ingredients."}
-              {activeTab === "sessions" && "All quiz completions and generated cocktails."}
-              {activeTab === "settings" && "Webhook and notification settings."}
-            </p>
+            <h2 className="font-display text-2xl font-bold text-white">{tabs.find((t) => t.id === activeTab)?.label}</h2>
+            <p className="text-white/40 text-sm mt-0.5">{tabDesc[activeTab]}</p>
           </div>
 
-          {/* Scrollable content */}
           <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-5 pb-16">
             {activeTab === "ingredients" && <IngredientsTab />}
-            {activeTab === "sessions" && <SessionsTab />}
+            {activeTab === "orders" && <OrdersTab />}
+            {activeTab === "qrcodes" && <QRCodesTab />}
             {activeTab === "settings" && <SettingsTab />}
           </div>
         </div>

@@ -32,15 +32,15 @@ const FLAVOR_EMOJIS: Record<string, string> = {
 };
 
 const ENERGY_LABELS: Record<string, string> = {
-  low: "Mellow", medium: "Balanced", high: "Electric",
+  low: "Ontspannen", medium: "Gebalanceerd", high: "Elektrisch",
 };
 
 const ADVENTURE_LABELS: Record<string, string> = {
-  classic: "Classic Soul", adventurous: "Adventurous", wild: "Wild Card",
+  classic: "Klassieke Ziel", adventurous: "Avontuurlijk", wild: "Wild Card",
 };
 
 const SOCIAL_LABELS: Record<string, string> = {
-  solo: "Solo Explorer", intimate: "Intimate Vibes", social: "Social Butterfly",
+  solo: "Solo Ontdekker", intimate: "Intieme Sfeer", social: "Sociale Vlinder",
 };
 
 function RecipeCard({ recipe, isActive, onClick }: { recipe: Recipe; isActive: boolean; onClick: () => void }) {
@@ -81,21 +81,21 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, onSuccess }: {
 
   const submitMutation = trpc.quiz.submitOrder.useMutation({
     onSuccess: () => {
-      toast.success("Order sent to the bar!");
+      toast.success("Bestelling verzonden naar de bar!");
       onSuccess();
     },
     onError: () => {
-      toast.error("Something went wrong. Try again.");
+      toast.error("Er is iets misgegaan. Probeer opnieuw.");
     },
   });
 
   const validate = () => {
     const e: { email?: string; age?: string; terms?: string } = {};
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      e.email = "Enter a valid email address.";
+      e.email = "Voer een geldig e-mailadres in.";
     }
-    if (!ageConfirmed) e.age = "You must confirm you are 18 or older.";
-    if (!termsAccepted) e.terms = "You must accept the terms to continue.";
+    if (!ageConfirmed) e.age = "Bevestig dat je 18 jaar of ouder bent.";
+    if (!termsAccepted) e.terms = "Je moet de voorwaarden accepteren om verder te gaan.";
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -122,17 +122,17 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, onSuccess }: {
           🍹
         </div>
         <div>
-          <div className="font-display text-lg font-bold text-white">Order this cocktail</div>
+          <div className="font-display text-lg font-bold text-white">Bestel deze cocktail</div>
           <p className="text-white/60 text-sm leading-snug mt-0.5">
-            Pressing the button below sends your cocktail request directly to the bartender.
-            You will get a <span className="text-white font-semibold">real drink</span> made just for you.
+            Door op de knop te drukken stuur je jouw cocktailverzoek rechtstreeks naar de barman.
+            Je krijgt een <span className="text-white font-semibold">echt drankje</span> speciaal voor jou gemaakt.
           </p>
         </div>
       </div>
 
       <div className="mb-4">
         <label className="block text-white/50 text-xs uppercase tracking-wider mb-1">
-          {guestName ? `${guestName}'s email` : "Your email"}
+          {guestName ? `${guestName}'s e-mailadres` : "Jouw e-mailadres"}
         </label>
         <input
           type="email"
@@ -153,7 +153,7 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, onSuccess }: {
             onChange={(e) => { setAgeConfirmed(e.target.checked); setErrors((prev) => ({ ...prev, age: undefined })); }}
             className="mt-0.5 w-4 h-4 accent-orange-400 flex-shrink-0"
           />
-          <span className="text-white/70 text-sm">I agree to receive communications from this company.</span>
+          <span className="text-white/70 text-sm">Ik ga akkoord met het ontvangen van communicatie van dit bedrijf.</span>
         </label>
         {errors.age && <p className="text-red-400 text-xs ml-7">{errors.age}</p>}
         <label className="flex items-start gap-3 cursor-pointer select-none">
@@ -163,7 +163,7 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, onSuccess }: {
             onChange={(e) => { setTermsAccepted(e.target.checked); setErrors((prev) => ({ ...prev, terms: undefined })); }}
             className="mt-0.5 w-4 h-4 accent-orange-400 flex-shrink-0"
           />
-          <span className="text-white/70 text-sm">I agree that my data may be shared with relevant third-party partners for marketing purposes.</span>
+          <span className="text-white/70 text-sm">Ik ga akkoord dat mijn gegevens gedeeld mogen worden met relevante externe partners voor marketingdoeleinden.</span>
         </label>
         {errors.terms && <p className="text-red-400 text-xs ml-7">{errors.terms}</p>}
       </div>
@@ -174,12 +174,12 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, onSuccess }: {
         className="w-full rounded-md py-4 text-base font-bold text-black transition-all duration-200 active:scale-95 disabled:opacity-60"
         style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)", boxShadow: "0 0 24px rgba(255,107,53,0.4)" }}
       >
-        {submitMutation.isPending ? "Sending to bar..." : "Order My Cocktail →"}
+        {submitMutation.isPending ? "Verzenden naar de bar..." : "Bestel Mijn Cocktail →"}
       </button>
 
       <p className="text-white/30 text-xs text-center mt-2.5">
-        Your details are only used to prepare your drink.{" "}
-        <a href="/privacy" className="underline hover:text-white/50 transition-colors">Privacy policy</a>
+        Jouw gegevens worden alleen gebruikt om jouw drankje te bereiden.{" "}
+        <a href="/privacy" className="underline hover:text-white/50 transition-colors">Privacybeleid</a>
       </p>
     </div>
   );
@@ -191,10 +191,10 @@ function OrderConfirmation({ guestName }: { guestName?: string | null }) {
       style={{ background: "rgba(16,185,129,0.1)", border: "2px solid rgba(16,185,129,0.35)" }}>
       <div className="text-4xl mb-3">🎉</div>
       <div className="font-display text-xl font-bold text-white mb-2">
-        {guestName ? `${guestName}, your order is in!` : "Your order is in!"}
+        {guestName ? `${guestName}, je bestelling is geplaatst!` : "Je bestelling is geplaatst!"}
       </div>
       <p className="text-white/60 text-sm leading-relaxed">
-        The bartender has received your cocktail request. Head to the bar and your personalised drink will be ready for you.
+        De barman heeft jouw verzoek ontvangen. Ga naar de bar en jouw gepersonaliseerde drankje staat klaar.
       </p>
     </div>
   );
@@ -231,7 +231,7 @@ export default function Result() {
         </div>
         <div className="relative z-10 text-center">
           <div className="text-7xl mb-6 float-anim">🍸</div>
-          <h2 className="font-display text-3xl font-bold text-white mb-4">Loading your cocktails...</h2>
+          <h2 className="font-display text-3xl font-bold text-white mb-4">Jouw cocktails worden geladen...</h2>
           <div className="flex gap-2 justify-center">
             {["#ff6b35", "#a855f7", "#22d3ee"].map((c, i) => (
               <div key={i} className="w-3 h-3 rounded-full animate-bounce"
@@ -247,12 +247,12 @@ export default function Result() {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 text-center">
         <div className="text-6xl mb-4">😅</div>
-        <h2 className="font-display text-3xl font-bold text-white mb-4">Something went wrong</h2>
-        <p className="text-white/60 mb-6">We could not load your cocktail results. Please try again.</p>
+        <h2 className="font-display text-3xl font-bold text-white mb-4">Er is iets misgegaan</h2>
+        <p className="text-white/60 mb-6">We konden jouw resultaten niet laden. Probeer het opnieuw.</p>
         <button onClick={() => setLocation("/")}
           className="rounded-md px-6 py-3 font-bold text-black"
           style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}>
-          Back to Home
+          Terug naar Home
         </button>
       </div>
     );
@@ -266,12 +266,12 @@ export default function Result() {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4 text-center">
         <div className="text-6xl mb-4">🔄</div>
-        <h2 className="font-display text-3xl font-bold text-white mb-4">Still crafting your recipes...</h2>
-        <p className="text-white/60 mb-6">Give it a moment and refresh.</p>
+        <h2 className="font-display text-3xl font-bold text-white mb-4">Recepten worden nog samengesteld...</h2>
+        <p className="text-white/60 mb-6">Geef het even een moment en ververs de pagina.</p>
         <button onClick={() => window.location.reload()}
           className="rounded-md px-6 py-3 font-bold text-black"
           style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}>
-          Refresh
+          Vernieuwen
         </button>
       </div>
     );
@@ -295,13 +295,13 @@ export default function Result() {
           <button onClick={() => setLocation("/")} className="text-white/40 hover:text-white/70 text-sm transition-colors">
             ← Home
           </button>
-          <div className="text-white/40 text-xs">Your cocktail profile</div>
+          <div className="text-white/40 text-xs">Jouw cocktailprofiel</div>
         </div>
 
         {/* Greeting */}
         <div className="px-4 pt-3 pb-2 text-center">
           <h1 className="font-display text-3xl sm:text-4xl font-bold text-white mb-1.5">
-            {data.guestName ? `${data.guestName}, meet your cocktail.` : "Meet your cocktail."}
+            {data.guestName ? `${data.guestName}, maak kennis met jouw cocktail.` : "Maak kennis met jouw cocktail."}
           </h1>
           <p className="text-white/55 text-sm">{profile.personalityType}</p>
         </div>
@@ -342,7 +342,7 @@ export default function Result() {
 
         {/* Recipe selector */}
         <div className="px-4 py-4">
-          <p className="text-white/40 text-xs text-center mb-3 uppercase tracking-wider">3 cocktails made for you. Pick your favourite.</p>
+          <p className="text-white/40 text-xs text-center mb-3 uppercase tracking-wider">3 cocktails gemaakt voor jou. Kies je favoriet.</p>
           <div className="grid grid-cols-1 gap-2">
             {recipes.map((r, i) => (
               <RecipeCard key={i} recipe={r} isActive={i === activeRecipe} onClick={() => setActiveRecipe(i)} />
@@ -357,13 +357,13 @@ export default function Result() {
 
             {/* Profile explanation */}
             <div className="mb-5 p-3.5 rounded-md" style={{ background: "rgba(255,255,255,0.04)" }}>
-              <div className="text-white/40 text-xs uppercase tracking-wider mb-1.5">Why this cocktail is yours</div>
+              <div className="text-white/40 text-xs uppercase tracking-wider mb-1.5">Waarom deze cocktail voor jou is</div>
               <p className="text-white/75 text-sm leading-relaxed">{recipe.profileExplanation}</p>
             </div>
 
             {/* Flavor notes */}
             <div className="mb-5">
-              <div className="text-white/40 text-xs uppercase tracking-wider mb-2">Flavor notes</div>
+              <div className="text-white/40 text-xs uppercase tracking-wider mb-2">Smaaknotities</div>
               <div className="flex flex-wrap gap-1.5">
                 {recipe.flavorNotes.map((note, i) => (
                   <span key={i} className="rounded px-2.5 py-1 text-xs font-semibold text-white capitalize"
@@ -376,7 +376,7 @@ export default function Result() {
 
             {/* Ingredients */}
             <div className="mb-5">
-              <div className="text-white/40 text-xs uppercase tracking-wider mb-2.5">Ingredients</div>
+              <div className="text-white/40 text-xs uppercase tracking-wider mb-2.5">Ingrediënten</div>
               <div className="grid grid-cols-1 gap-1.5">
                 {recipe.ingredients.map((ing, i) => (
                   <div key={i} className="flex items-center justify-between rounded-md px-3.5 py-2.5"
@@ -392,7 +392,7 @@ export default function Result() {
 
             {/* Instructions */}
             <div>
-              <div className="text-white/40 text-xs uppercase tracking-wider mb-2.5">How to make it</div>
+              <div className="text-white/40 text-xs uppercase tracking-wider mb-2.5">Hoe maak je het</div>
               <div className="flex flex-col gap-2">
                 {recipe.instructions.map((step, i) => (
                   <div key={i} className="flex gap-3 items-start">
@@ -424,7 +424,7 @@ export default function Result() {
           <div className="text-center mt-5">
             <button onClick={() => setLocation("/")}
               className="text-white/30 hover:text-white/60 text-sm transition-colors underline underline-offset-2">
-              Start over
+              Opnieuw beginnen
             </button>
           </div>
         </div>

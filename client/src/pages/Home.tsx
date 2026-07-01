@@ -4,14 +4,14 @@ import { trpc } from "@/lib/trpc";
 import * as THREE from "three";
 
 const FALLBACK_REVIEWS = [
-  { id: 1, name: "Sofia M.", text: "I got a spicy passion fruit margarita and it was exactly what I needed. Never would have ordered that myself!", rating: 5, color: "#ff6b35" },
-  { id: 2, name: "Emma V.", text: "The quiz took 2 minutes and my cocktail was genuinely perfect. The bartender was impressed by the recipe too.", rating: 5, color: "#a855f7" },
-  { id: 3, name: "Lena K.", text: "Got a lavender gin fizz. I am not a gin person but this converted me completely.", rating: 5, color: "#22d3ee" },
-  { id: 4, name: "Nathalie B.", text: "My friends and I all did it together and got completely different cocktails. All of them were spot on.", rating: 5, color: "#f59e0b" },
-  { id: 5, name: "Yasmine R.", text: "Really fun experience. The cocktail matched my vibe perfectly. Will do it every time I come here.", rating: 4, color: "#ec4899" },
-  { id: 6, name: "Amelie D.", text: "I always order the same thing. This made me try something new and it was the best drink I have had in years.", rating: 5, color: "#10b981" },
-  { id: 7, name: "Thomas W.", text: "Skeptical at first but the coconut rum smash it gave me was incredible. Highly recommend.", rating: 5, color: "#6366f1" },
-  { id: 8, name: "Julien P.", text: "Got a smoky mezcal sour. Exactly my personality apparently. Loved it.", rating: 4, color: "#f97316" },
+  { id: 1, name: "Sofia M.", text: "Ik kreeg een pittige passievrucht margarita en dat was precies wat ik nodig had. Dat had ik nooit zelf besteld!", rating: 5, color: "#ff6b35" },
+  { id: 2, name: "Emma V.", text: "De quiz duurde 2 minuten en mijn cocktail was gewoon perfect. De barman was ook onder de indruk van het recept.", rating: 5, color: "#a855f7" },
+  { id: 3, name: "Lena K.", text: "Ik kreeg een lavendel gin fizz. Ik ben normaal geen gin-persoon, maar dit heeft me volledig omgedraaid.", rating: 5, color: "#22d3ee" },
+  { id: 4, name: "Nathalie B.", text: "Mijn vrienden en ik deden het samen en kregen allemaal andere cocktails. Ze waren allemaal raak.", rating: 5, color: "#f59e0b" },
+  { id: 5, name: "Yasmine R.", text: "Echt leuke ervaring. De cocktail paste perfect bij mijn vibe. Dit doe ik elke keer dat ik hier kom.", rating: 4, color: "#ec4899" },
+  { id: 6, name: "Amelie D.", text: "Ik bestel altijd hetzelfde. Dit zette me ertoe om iets nieuws te proberen en het was het beste drankje dat ik in jaren heb gehad.", rating: 5, color: "#10b981" },
+  { id: 7, name: "Thomas W.", text: "Was eerst sceptisch maar de kokos rum smash was ongelooflijk. Echt een aanrader.", rating: 5, color: "#6366f1" },
+  { id: 8, name: "Julien P.", text: "Kreeg een rokerige mezcal sour. Schijnbaar exact mijn persoonlijkheid. Geweldig.", rating: 4, color: "#f97316" },
 ];
 
 /**
@@ -193,11 +193,11 @@ export default function Home() {
         {/* ── HERO ── */}
         <div className="flex flex-col items-center justify-center text-center px-5 pt-28 pb-24 min-h-screen">
           <h1 className="font-display text-5xl sm:text-6xl md:text-7xl font-bold text-white leading-tight mb-5">
-            Your cocktail,{" "}
-            <span className="beast-text-gradient">made for you.</span>
+            Jouw cocktail,{" "}
+            <span className="beast-text-gradient">gemaakt voor jou.</span>
           </h1>
           <p className="text-white/65 text-lg sm:text-xl mb-10 max-w-lg mx-auto leading-relaxed">
-            Answer 10 fun questions. Get 3 cocktails designed around your personality, your mood, and your flavour psychology. Then we make it right at the bar.
+            Beantwoord 10 leuke vragen. Krijg 3 cocktails ontworpen rondom jouw persoonlijkheid, stemming en smaakpsychologie. We maken het meteen aan de bar.
           </p>
           <button
             onClick={() => setLocation("/quiz")}
@@ -209,10 +209,10 @@ export default function Home() {
             }}
           >
             <span className="text-2xl">🍹</span>
-            Find My Cocktail
+            Vind Mijn Cocktail
             <span className="text-xl">→</span>
           </button>
-          <p className="text-white/35 text-sm mt-4">Takes about 2 minutes. Free to try.</p>
+          <p className="text-white/35 text-sm mt-4">Duurt ongeveer 2 minuten. Gratis te proberen.</p>
 
           {/* Scroll hint */}
           <div className="mt-16 flex flex-col items-center gap-2 text-white/30">
@@ -229,14 +229,14 @@ export default function Home() {
         {/* ── HOW IT WORKS ── */}
         <div className="px-5 py-20 max-w-3xl mx-auto">
           <div className="text-center mb-14">
-            <h2 className="font-display text-4xl sm:text-5xl font-bold text-white mb-3">How it works</h2>
-            <p className="text-white/50 text-lg">Three steps to your perfect drink.</p>
+            <h2 className="font-display text-4xl sm:text-5xl font-bold text-white mb-3">Hoe het werkt</h2>
+            <p className="text-white/50 text-lg">Drie stappen naar jouw perfecte drankje.</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {[
-              { step: "01", emoji: "🧠", title: "Take the quiz", desc: "10 fun questions about your personality, mood, and flavor vibes." },
-              { step: "02", emoji: "✨", title: "We read your mind", desc: "Flavor psychology turns your answers into a precise cocktail profile." },
-              { step: "03", emoji: "🍸", title: "Get your cocktail", desc: "3 personalised recipes, made from what we have at the bar, right now." },
+              { step: "01", emoji: "🧠", title: "Doe de quiz", desc: "10 leuke vragen over jouw persoonlijkheid, stemming en smaak." },
+              { step: "02", emoji: "✨", title: "We lezen je gedachten", desc: "Smaakpsychologie zet jouw antwoorden om in een cocktailprofiel op maat." },
+              { step: "03", emoji: "🍸", title: "Krijg jouw cocktail", desc: "3 gepersonaliseerde recepten, gemaakt van wat we op dit moment aan de bar hebben." },
             ].map((item) => (
               <div
                 key={item.step}
@@ -259,8 +259,8 @@ export default function Home() {
         {/* ── REVIEWS ── */}
         <div className="py-20">
           <div className="text-center mb-10 px-5">
-            <h2 className="font-display text-4xl sm:text-5xl font-bold text-white mb-3">People are obsessed</h2>
-            <p className="text-white/50 text-lg">Real drinks, real reactions.</p>
+            <h2 className="font-display text-4xl sm:text-5xl font-bold text-white mb-3">Iedereen is er gek op</h2>
+            <p className="text-white/50 text-lg">Echte drankjes, echte reacties.</p>
           </div>
           <div className="overflow-x-auto pb-4 px-5">
             <div className="flex gap-4 w-max">
@@ -276,7 +276,7 @@ export default function Home() {
               ))}
             </div>
             <span className="text-white font-bold text-lg">5.0</span>
-            <span className="text-white/45">from 200+ cocktails served</span>
+            <span className="text-white/45">van 200+ cocktails geserveerd</span>
           </div>
         </div>
 
@@ -284,10 +284,10 @@ export default function Home() {
         <div className="px-5 py-28 text-center max-w-xl mx-auto">
           <div className="text-6xl mb-6 float-anim">🍹</div>
           <h2 className="font-display text-4xl sm:text-5xl font-bold text-white mb-4">
-            Ready to meet your cocktail?
+            Klaar om jouw cocktail te ontmoeten?
           </h2>
           <p className="text-white/55 text-lg mb-10">
-            The bartender is waiting. Your flavor profile is one quiz away.
+            De barman wacht. Jouw smaakprofiel is één quiz verwijderd.
           </p>
           <button
             onClick={() => setLocation("/quiz")}
@@ -299,7 +299,7 @@ export default function Home() {
             }}
           >
             <span className="text-2xl">🎯</span>
-            Start the Quiz
+            Start de Quiz
           </button>
         </div>
 
@@ -309,7 +309,7 @@ export default function Home() {
           style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}
         >
           <p className="font-display text-base font-bold text-white/40 mb-1">The Beast Bar</p>
-          <p>Indonesia &bull; Cocktails made personal</p>
+          <p>Indonesië &bull; Cocktails op maat</p>
         </footer>
       </div>
     </div>
