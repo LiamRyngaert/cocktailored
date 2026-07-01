@@ -491,20 +491,41 @@ type AdminRecipe = {
   profileExplanation?: string;
 };
 
+const SERVED_KEY = "bb_served_map";
+const ONE_HOUR = 60 * 60 * 1000;
+
+function loadServedMap(): Map<number, number> {
+  try {
+    const raw = localStorage.getItem(SERVED_KEY);
+    if (!raw) return new Map();
+    const obj: Record<string, number> = JSON.parse(raw);
+    const now = Date.now();
+    const m = new Map<number, number>();
+    for (const [k, v] of Object.entries(obj)) {
+      if (now - v < ONE_HOUR) m.set(Number(k), v);
+    }
+    return m;
+  } catch { return new Map(); }
+}
+
+function saveServedMap(m: Map<number, number>) {
+  const obj: Record<string, number> = {};
+  m.forEach((v, k) => { obj[k] = v; });
+  localStorage.setItem(SERVED_KEY, JSON.stringify(obj));
+}
+
 function OrdersTab() {
   const { data: sessions } = trpc.admin.getSessions.useQuery();
-  const [servedMap, setServedMap] = useState<Map<number, number>>(new Map());
+  const [servedMap, setServedMap] = useState<Map<number, number>>(() => loadServedMap());
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [showTrash, setShowTrash] = useState(false);
 
-  const ONE_HOUR = 60 * 60 * 1000;
-
   const markServed = (id: number) =>
-    setServedMap((prev) => { const m = new Map(prev); m.set(id, Date.now()); return m; });
+    setServedMap((prev) => { const m = new Map(prev); m.set(id, Date.now()); saveServedMap(m); return m; });
 
   const unmarkServed = (id: number) =>
-    setServedMap((prev) => { const m = new Map(prev); m.delete(id); return m; });
+    setServedMap((prev) => { const m = new Map(prev); m.delete(id); saveServedMap(m); return m; });
 
   // Only sessions where client actually pressed Order
   const orderedSessions = useMemo(() =>

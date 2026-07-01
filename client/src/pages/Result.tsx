@@ -43,7 +43,14 @@ const SOCIAL_LABELS: Record<string, string> = {
   solo: "Solo Ontdekker", intimate: "Intieme Sfeer", social: "Sociale Vlinder",
 };
 
-function RecipeCard({ recipe, isActive, onClick }: { recipe: Recipe; isActive: boolean; onClick: () => void }) {
+const RANK_LABELS = [
+  { num: "#1", label: "Perfecte match", color: "#f59e0b" },
+  { num: "#2", label: "Waarschijnlijk ook lekker", color: "#a855f7" },
+  { num: "#3", label: "Prima keuze", color: "#22d3ee" },
+];
+
+function RecipeCard({ recipe, isActive, onClick, rank }: { recipe: Recipe; isActive: boolean; onClick: () => void; rank: number }) {
+  const rankInfo = RANK_LABELS[rank] ?? RANK_LABELS[2];
   return (
     <button
       onClick={onClick}
@@ -55,6 +62,13 @@ function RecipeCard({ recipe, isActive, onClick }: { recipe: Recipe; isActive: b
         border: isActive ? `2px solid ${recipe.colorHex}` : "1.5px solid rgba(255,255,255,0.1)",
       }}
     >
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-xs font-black px-2 py-0.5 rounded-full"
+          style={{ background: `${rankInfo.color}22`, color: rankInfo.color, border: `1px solid ${rankInfo.color}55` }}>
+          {rankInfo.num}
+        </span>
+        <span className="text-xs" style={{ color: rankInfo.color + "aa" }}>{rankInfo.label}</span>
+      </div>
       <div className="flex items-center gap-3 mb-1.5">
         <div className="w-7 h-7 rounded-full flex-shrink-0"
           style={{ background: recipe.colorHex, boxShadow: `0 0 10px ${recipe.colorHex}66` }} />
@@ -345,7 +359,7 @@ export default function Result() {
           <p className="text-white/40 text-xs text-center mb-3 uppercase tracking-wider">3 cocktails gemaakt voor jou. Kies je favoriet.</p>
           <div className="grid grid-cols-1 gap-2">
             {recipes.map((r, i) => (
-              <RecipeCard key={i} recipe={r} isActive={i === activeRecipe} onClick={() => setActiveRecipe(i)} />
+              <RecipeCard key={i} recipe={r} isActive={i === activeRecipe} onClick={() => setActiveRecipe(i)} rank={i} />
             ))}
           </div>
         </div>
