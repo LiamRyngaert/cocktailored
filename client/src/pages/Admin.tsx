@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
+import QRCodeLib from "qrcode";
 
 type AdminTab = "ingredients" | "orders" | "qrcodes" | "settings";
 
@@ -652,23 +653,12 @@ function OrdersTab() {
 
 // ── QR Codes tab ─────────────────────────────────────────────────────────────
 
-const GRAD_PREVIEWS = [
-  "linear-gradient(135deg,#ff9a00,#ff3cac,#9b59b6)",
-  "linear-gradient(135deg,#ff9a00,#ff6b35,#ff3cac,#c800ff,#7b2fff)",
-  "conic-gradient(from 0deg,#ff9a00,#ff3cac,#9b59b6,#3b82f6,#ff9a00)",
-  "radial-gradient(circle at 30% 30%,#ff9a00,#ff3cac,#9b59b6)",
-];
+const QR_URL = "https://cocktailored.ai";
 
 function QRCodesTab() {
-  const [url, setUrl] = useState("https://cocktailored.ai");
-  const [selectedGrad, setSelectedGrad] = useState(0);
-  const [logoName, setLogoName] = useState("");
-  const [logoSize, setLogoSize] = useState(20);
-  const [qrSize, setQrSize] = useState(300);
-  const [generating, setGenerating] = useState(false);
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [cardDataUrl, setCardDataUrl] = useState<string | null>(null);
-  const [view, setView] = useState<"generator" | "stickers">("generator");
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<"home" | "stickers">("home");
   const [stickerQty, setStickerQty] = useState(5);
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
@@ -676,95 +666,52 @@ function QRCodesTab() {
   const [ordering, setOrdering] = useState(false);
   const [orderDone, setOrderDone] = useState(false);
 
-  const logoImageRef = useRef<HTMLImageElement | null>(null);
-  const logoInputRef = useRef<HTMLInputElement>(null);
-  const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  const scriptLoadedRef = useRef(false);
-
   useEffect(() => {
-    if ((window as any).QRCode) { scriptLoadedRef.current = true; return; }
-    const s = document.createElement("script");
-    s.src = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
-    s.onload = () => { scriptLoadedRef.current = true; };
-    document.head.appendChild(s);
+    let cancelled = false;
+    (async () => {
+      try {
+        const size = 400;
+        const rawDataUrl: string = await QRCodeLib.toDataURL(QR_URL, {
+          width: size, margin: 1, errorCorrectionLevel: "H",
+          color: { dark: "#000000", light: "#ffffff" },
+        });
+        const qrImg = new Image();
+        qrImg.onload = () => {
+          if (cancelled) return;
+          const styled = applyGradientToQR(qrImg, 0, size);
+          const card = buildCardCanvas(styled);
+          setCardDataUrl(card.toDataURL("image/png"));
+          setLoading(false);
+        };
+        qrImg.src = rawDataUrl;
+      } catch {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
-
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setLogoName(file.name);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const img = new Image();
-      img.onload = () => { logoImageRef.current = img; };
-      img.src = ev.target?.result as string;
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const generateQR = async () => {
-    if (!url.trim() || generating) return;
-    if (!(window as any).QRCode) { toast.error("QR bibliotheek laden... probeer opnieuw."); return; }
-    setGenerating(true);
-    try {
-      const tmp = document.createElement("div");
-      tmp.style.cssText = "position:absolute;left:-9999px;top:-9999px;";
-      document.body.appendChild(tmp);
-      new (window as any).QRCode(tmp, { text: url, width: qrSize, height: qrSize, colorDark: "#000000", colorLight: "#ffffff", correctLevel: (window as any).QRCode.CorrectLevel.H });
-      await new Promise((r) => setTimeout(r, 150));
-      const src = tmp.querySelector("img") || tmp.querySelector("canvas");
-      if (!src) { document.body.removeChild(tmp); setGenerating(false); return; }
-      const getUrl = (el: Element) => el instanceof HTMLCanvasElement ? el.toDataURL() : (el as HTMLImageElement).src;
-      const qrImg = new Image();
-      qrImg.onload = () => {
-        document.body.removeChild(tmp);
-        const styled = applyGradientToQR(qrImg, selectedGrad, qrSize);
-        if (logoImageRef.current) {
-          const ctx = styled.getContext("2d")!;
-          const ls = qrSize * (logoSize / 100);
-          const lx = (qrSize - ls) / 2, ly = (qrSize - ls) / 2;
-          const pad = ls * 0.15, bs = ls + pad * 2, bx = lx - pad, by = ly - pad;
-          ctx.fillStyle = "#0d0d0d";
-          ctx.beginPath();
-          if (ctx.roundRect) ctx.roundRect(bx, by, bs, bs, 10); else ctx.rect(bx, by, bs, bs);
-          ctx.fill();
-          ctx.save();
-          ctx.beginPath();
-          if (ctx.roundRect) ctx.roundRect(bx, by, bs, bs, 10); else ctx.rect(bx, by, bs, bs);
-          ctx.clip();
-          ctx.drawImage(logoImageRef.current, lx, ly, ls, ls);
-          ctx.restore();
-        }
-        qrCanvasRef.current = styled;
-        setQrDataUrl(styled.toDataURL("image/png"));
-        const card = buildCardCanvas(styled);
-        setCardDataUrl(card.toDataURL("image/png"));
-        setGenerating(false);
-      };
-      qrImg.src = getUrl(src);
-    } catch {
-      toast.error("Kon QR code niet genereren.");
-      setGenerating(false);
-    }
-  };
-
-  const downloadQR = () => {
-    if (!qrDataUrl) return;
-    const a = document.createElement("a"); a.download = "cocktailored-qr.png"; a.href = qrDataUrl; a.click();
-  };
-
-  const downloadCard = () => {
-    if (!cardDataUrl) return;
-    const a = document.createElement("a"); a.download = "cocktailored-kaartje.png"; a.href = cardDataUrl; a.click();
-  };
 
   const downloadPDF = () => {
     if (!cardDataUrl) return;
     const win = window.open("", "_blank");
     if (!win) return;
-    win.document.write(`<!DOCTYPE html><html><head><title>Cocktailored QR Kaartje</title><style>body{margin:0;padding:20px;background:#fff;display:flex;justify-content:center;align-items:center;min-height:100vh}img{width:90mm;height:90mm}@media print{body{padding:0}img{width:100%;height:auto}}</style></head><body><img src="${cardDataUrl}"/><script>window.onload=function(){window.print()}<\/script></body></html>`);
+    win.document.write(
+      `<!DOCTYPE html><html><head><title>Cocktailored QR Kaartje</title>` +
+      `<style>*{box-sizing:border-box}body{margin:0;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:system-ui,sans-serif;gap:16px}` +
+      `img{width:90mm;height:90mm;border-radius:8px}p{font-size:11px;color:#666;text-align:center}` +
+      `@media print{p{display:none}body{min-height:auto}img{width:100%;border-radius:0}}</style></head>` +
+      `<body><img src="${cardDataUrl}"/><p>Sla op als PDF of druk direct af — kies 'Opslaan als PDF' als printer.</p>` +
+      `<script>window.onload=function(){window.print()}<\/script></body></html>`
+    );
     win.document.close();
+  };
+
+  const downloadPNG = () => {
+    if (!cardDataUrl) return;
+    const a = document.createElement("a");
+    a.download = "cocktailored-qr-kaartje.png";
+    a.href = cardDataUrl;
+    a.click();
   };
 
   const placeOrder = async () => {
@@ -782,9 +729,9 @@ function QRCodesTab() {
   if (view === "stickers") {
     return (
       <div>
-        <button onClick={() => { setView("generator"); setOrderDone(false); }}
+        <button onClick={() => { setView("home"); setOrderDone(false); }}
           className="flex items-center gap-2 text-white/50 hover:text-white text-sm mb-5 transition-colors">
-          ← Terug naar generator
+          ← Terug
         </button>
 
         {orderDone ? (
@@ -799,16 +746,19 @@ function QRCodesTab() {
               <div className="flex justify-between text-sm mb-1"><span className="text-white/60">Prijs per 5</span><span className="text-white">€10,00</span></div>
               <div className="flex justify-between text-sm border-t border-white/10 pt-2 mt-2"><span className="text-white font-semibold">Totaal</span><span className="font-bold" style={{ color: "#ff6b35" }}>€{stickerPrice.toFixed(2)}</span></div>
             </div>
-            <button onClick={() => { setOrderDone(false); setView("generator"); }}
+            <button onClick={() => { setOrderDone(false); setView("home"); }}
               className="mt-5 text-white/30 hover:text-white/60 text-sm underline transition-colors">
               Nieuwe bestelling
             </button>
           </div>
         ) : (
           <div className="flex flex-col gap-4">
+            {cardDataUrl && (
+              <img src={cardDataUrl} alt="QR kaartje preview" className="w-full max-w-xs mx-auto rounded-xl" />
+            )}
             <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
               <div className="font-semibold text-white mb-1">Aantal stickers</div>
-              <p className="text-white/40 text-xs mb-3">We verkopen stickers per 5 voor €10,00.</p>
+              <p className="text-white/40 text-xs mb-3">Per 5 stuks voor €10,00.</p>
               <div className="flex gap-2 flex-wrap mb-3">
                 {[5, 10, 15, 20, 25, 50].map((qty) => (
                   <button key={qty} onClick={() => setStickerQty(qty)}
@@ -858,104 +808,62 @@ function QRCodesTab() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
-        <div className="font-semibold text-white mb-4">QR code generator</div>
-
-        <div className="mb-4">
-          <label className="block text-white/50 text-xs uppercase tracking-wider mb-1.5">URL of tekst</label>
-          <input type="text" value={url} onChange={(e) => setUrl(e.target.value)}
-            className="w-full rounded-md px-3 py-2.5 text-white placeholder-white/30 outline-none text-sm"
-            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
-            placeholder="https://jouw-link.com" />
+      {loading ? (
+        <div className="flex flex-col items-center py-12 gap-3">
+          <span className="inline-block w-8 h-8 border-2 border-white/10 border-t-white/60 rounded-full animate-spin" />
+          <p className="text-white/40 text-sm">QR kaartje wordt aangemaakt...</p>
         </div>
-
-        <div className="mb-4">
-          <label className="block text-white/50 text-xs uppercase tracking-wider mb-2">Gradient stijl</label>
-          <div className="flex gap-2">
-            {GRAD_PREVIEWS.map((grad, i) => (
-              <button key={i} onClick={() => setSelectedGrad(i)}
-                className="flex-1 h-7 rounded-md transition-all"
-                style={{ background: grad, border: selectedGrad === i ? "2px solid #fff" : "2px solid transparent", outline: selectedGrad === i ? "2px solid rgba(255,255,255,0.3)" : "none", outlineOffset: "2px" }} />
-            ))}
-          </div>
+      ) : cardDataUrl ? (
+        <div className="flex flex-col items-center">
+          <img src={cardDataUrl} alt="Cocktailored QR kaartje" className="w-full max-w-xs rounded-xl mb-2" />
+          <p className="text-white/30 text-xs mb-5">cocktailored.ai</p>
         </div>
-
-        <div className="mb-4">
-          <label className="block text-white/50 text-xs uppercase tracking-wider mb-1.5">Logo in het midden (optioneel)</label>
-          <button onClick={() => logoInputRef.current?.click()}
-            className="w-full rounded-md px-4 py-2.5 text-sm text-left transition-all"
-            style={{ background: "rgba(255,255,255,0.04)", border: "1.5px dashed rgba(255,255,255,0.18)" }}>
-            <span className="text-white/40">{logoName || "Klik om een logo te uploaden"}</span>
-          </button>
-          <input ref={logoInputRef} type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
-        </div>
-
-        <div className="mb-4">
-          <div className="flex items-center justify-between mb-1.5">
-            <label className="text-white/50 text-xs uppercase tracking-wider">Logo grootte</label>
-            <span className="text-white/35 text-xs">{logoSize}%</span>
-          </div>
-          <input type="range" min={10} max={32} value={logoSize} onChange={(e) => setLogoSize(Number(e.target.value))}
-            className="w-full" style={{ accentColor: "#ff9a00" }} />
-        </div>
-
-        <div className="mb-5">
-          <label className="block text-white/50 text-xs uppercase tracking-wider mb-1.5">QR formaat</label>
-          <select value={qrSize} onChange={(e) => setQrSize(Number(e.target.value))}
-            className="w-full rounded-md px-3 py-2.5 text-white outline-none text-sm"
-            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}>
-            <option value={200} style={{ background: "#0d0d1a" }}>Klein — 200px</option>
-            <option value={300} style={{ background: "#0d0d1a" }}>Normaal — 300px</option>
-            <option value={400} style={{ background: "#0d0d1a" }}>Groot — 400px</option>
-            <option value={600} style={{ background: "#0d0d1a" }}>Extra groot — 600px</option>
-          </select>
-        </div>
-
-        <button onClick={generateQR} disabled={generating || !url.trim()}
-          className="w-full rounded-md py-3 font-bold text-white text-sm uppercase tracking-wider disabled:opacity-60 transition-all active:scale-95"
-          style={{ background: "linear-gradient(135deg, #ff9a00, #ff3cac, #9b59b6)" }}>
-          {generating ? "Genereren..." : "Genereer QR code"}
-        </button>
-      </div>
-
-      {qrDataUrl && (
-        <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
-          <div className="font-semibold text-white mb-4">Voorbeeld</div>
-          <div className="flex flex-col items-center gap-4">
-            <img src={qrDataUrl} alt="QR code" className="rounded-lg" style={{ width: Math.min(qrSize, 280), height: Math.min(qrSize, 280), imageRendering: "pixelated" }} />
-            {cardDataUrl && (
-              <img src={cardDataUrl} alt="Cocktailored kaartje" className="rounded-xl w-full max-w-xs" />
-            )}
-            <div className="flex gap-2 flex-wrap justify-center w-full">
-              <button onClick={downloadQR} className="rounded-md px-4 py-2 text-sm font-semibold text-white/70 hover:text-white transition-all"
-                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)" }}>
-                📥 QR (PNG)
-              </button>
-              <button onClick={downloadCard} className="rounded-md px-4 py-2 text-sm font-semibold text-white/70 hover:text-white transition-all"
-                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)" }}>
-                🎴 Kaartje (PNG)
-              </button>
-              <button onClick={downloadPDF} className="rounded-md px-4 py-2 text-sm font-semibold text-black transition-all active:scale-95"
-                style={{ background: "linear-gradient(135deg, #ff9a00, #ff3cac)" }}>
-                🖨 Afdrukken (PDF)
-              </button>
-            </div>
-          </div>
-        </div>
+      ) : (
+        <div className="text-center py-8 text-white/30 text-sm">Kon QR code niet genereren.</div>
       )}
 
-      <button onClick={() => setView("stickers")}
-        className="w-full rounded-md p-4 text-left transition-all duration-150 hover:border-white/20 active:scale-99"
-        style={{ background: "rgba(255,154,0,0.06)", border: "1.5px solid rgba(255,154,0,0.25)" }}>
-        <div className="flex items-center justify-between">
+      <button onClick={downloadPDF} disabled={!cardDataUrl}
+        className="w-full rounded-xl p-5 text-left transition-all duration-150 disabled:opacity-40 hover:border-white/20 active:scale-99"
+        style={{ background: "rgba(255,154,0,0.08)", border: "1.5px solid rgba(255,154,0,0.3)" }}>
+        <div className="flex items-center gap-4">
+          <div className="w-11 h-11 rounded-lg flex items-center justify-center text-2xl flex-shrink-0"
+            style={{ background: "linear-gradient(135deg, #ff9a00, #ff3cac)" }}>🖨</div>
           <div>
-            <div className="font-semibold text-white flex items-center gap-2">
-              🏷 QR stickers bestellen
-              <span className="text-xs rounded px-2 py-0.5 font-bold" style={{ background: "rgba(255,154,0,0.2)", color: "#ff9a00" }}>NIEUW</span>
-            </div>
-            <p className="text-white/40 text-xs mt-0.5">Professioneel gedrukte stickers — €10 per 5 stuks. Klaar voor de bar.</p>
+            <div className="font-bold text-white">Zelf afdrukken</div>
+            <p className="text-white/40 text-xs mt-0.5">Download als PDF en print je eigen stickers thuis of bij een printshop.</p>
           </div>
-          <span className="text-white/40 text-sm">→</span>
+          <span className="text-white/30 ml-auto">→</span>
+        </div>
+      </button>
+
+      <button onClick={downloadPNG} disabled={!cardDataUrl}
+        className="w-full rounded-xl p-5 text-left transition-all duration-150 disabled:opacity-40 hover:border-white/15 active:scale-99"
+        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }}>
+        <div className="flex items-center gap-4">
+          <div className="w-11 h-11 rounded-lg flex items-center justify-center text-2xl flex-shrink-0"
+            style={{ background: "rgba(255,255,255,0.1)" }}>📥</div>
+          <div>
+            <div className="font-bold text-white">Download PNG</div>
+            <p className="text-white/40 text-xs mt-0.5">Sla het kaartje op als afbeelding om zelf te gebruiken.</p>
+          </div>
+          <span className="text-white/30 ml-auto">→</span>
+        </div>
+      </button>
+
+      <button onClick={() => setView("stickers")}
+        className="w-full rounded-xl p-5 text-left transition-all duration-150 hover:border-white/20 active:scale-99"
+        style={{ background: "rgba(168,85,247,0.08)", border: "1.5px solid rgba(168,85,247,0.25)" }}>
+        <div className="flex items-center gap-4">
+          <div className="w-11 h-11 rounded-lg flex items-center justify-center text-2xl flex-shrink-0"
+            style={{ background: "linear-gradient(135deg, #a855f7, #ec4899)" }}>🏷</div>
+          <div>
+            <div className="font-bold text-white flex items-center gap-2">
+              Stickers bestellen
+              <span className="text-xs rounded px-2 py-0.5 font-bold" style={{ background: "rgba(168,85,247,0.25)", color: "#a855f7" }}>NIEUW</span>
+            </div>
+            <p className="text-white/40 text-xs mt-0.5">Professioneel gedrukt — €10 per 5 stuks, rechtstreeks aan de deur.</p>
+          </div>
+          <span className="text-white/30 ml-auto">→</span>
         </div>
       </button>
     </div>
