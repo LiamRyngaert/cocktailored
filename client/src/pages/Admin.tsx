@@ -493,10 +493,8 @@ type AdminRecipe = {
 
 function OrdersTab() {
   const { data: sessions } = trpc.admin.getSessions.useQuery();
-  // Map<id, servedAt timestamp>
   const [servedMap, setServedMap] = useState<Map<number, number>>(new Map());
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [activeRecipeIdx, setActiveRecipeIdx] = useState(0);
   const [search, setSearch] = useState("");
   const [showTrash, setShowTrash] = useState(false);
 
@@ -508,21 +506,25 @@ function OrdersTab() {
   const unmarkServed = (id: number) =>
     setServedMap((prev) => { const m = new Map(prev); m.delete(id); return m; });
 
-  // Active = not served
-  const activeSessions = useMemo(() =>
-    (sessions ?? []).filter((s) => !servedMap.has(s.id) &&
-      (s.guestName ?? "").toLowerCase().includes(search.toLowerCase())),
-    [sessions, servedMap, search]
+  // Only sessions where client actually pressed Order
+  const orderedSessions = useMemo(() =>
+    (sessions ?? []).filter((s) => s.orderSubmitted),
+    [sessions]
   );
 
-  // Trash = served within last hour
+  const activeSessions = useMemo(() =>
+    orderedSessions.filter((s) => !servedMap.has(s.id) &&
+      (s.guestName ?? "").toLowerCase().includes(search.toLowerCase())),
+    [orderedSessions, servedMap, search]
+  );
+
   const now = Date.now();
   const trashSessions = useMemo(() =>
-    (sessions ?? []).filter((s) => {
+    orderedSessions.filter((s) => {
       const t = servedMap.get(s.id);
       return t !== undefined && now - t < ONE_HOUR;
     }),
-    [sessions, servedMap]
+    [orderedSessions, servedMap]
   );
 
   const selectedSession = sessions?.find((s) => s.id === selectedId);
@@ -536,7 +538,7 @@ function OrdersTab() {
         </button>
         <div className="mb-4">
           <h3 className="font-display text-lg font-bold text-white">Prullenbak</h3>
-          <p className="text-white/40 text-xs mt-0.5">Geserveerde bestellingen — worden automatisch verwijderd na 1 uur.</p>
+          <p className="text-white/40 text-xs mt-0.5">Geserveerde bestellingen — automatisch verwijderd na 1 uur.</p>
         </div>
         <div className="flex flex-col gap-2">
           {trashSessions.length === 0 ? (
@@ -546,6 +548,8 @@ function OrdersTab() {
             </div>
           ) : trashSessions.map((session) => {
             const recipes = session.recipes as AdminRecipe[] | null;
+            const idx = session.selectedRecipeIndex ?? 0;
+            const recipe = recipes?.[idx];
             const servedAt = servedMap.get(session.id)!;
             const minutesAgo = Math.round((now - servedAt) / 60000);
             return (
@@ -554,7 +558,7 @@ function OrdersTab() {
                 <div>
                   <div className="text-white/60 font-semibold text-sm">{session.guestName ?? "Anoniem"}</div>
                   <div className="text-white/30 text-xs mt-0.5">
-                    {recipes?.[0]?.name && <span>{recipes[0].name} · </span>}
+                    {recipe?.name && <span>{recipe.name} · </span>}
                     Geserveerd {minutesAgo === 0 ? "zojuist" : `${minutesAgo} min. geleden`}
                   </div>
                 </div>
@@ -573,12 +577,13 @@ function OrdersTab() {
 
   if (selectedSession) {
     const recipes = selectedSession.recipes as AdminRecipe[] | null;
-    const recipe = recipes?.[activeRecipeIdx];
+    const idx = selectedSession.selectedRecipeIndex ?? 0;
+    const recipe = recipes?.[idx];
     const isServed = servedMap.has(selectedSession.id);
 
     return (
       <div>
-        <button onClick={() => { setSelectedId(null); setActiveRecipeIdx(0); }}
+        <button onClick={() => setSelectedId(null)}
           className="flex items-center gap-2 text-white/50 hover:text-white text-sm mb-5 transition-colors">
           ← Terug naar bestellingen
         </button>
@@ -590,23 +595,6 @@ function OrdersTab() {
             {new Date(selectedSession.createdAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" })}
           </p>
         </div>
-
-        {recipes && recipes.length > 1 && (
-          <div className="mb-4">
-            <div className="text-white/40 text-xs uppercase tracking-wider mb-2">Cocktailkeuze</div>
-            <div className="flex flex-col gap-2">
-              {recipes.map((r, i) => (
-                <button key={i} onClick={() => setActiveRecipeIdx(i)}
-                  className="flex items-center gap-3 rounded-md px-4 py-3 text-left transition-all"
-                  style={{ background: i === activeRecipeIdx ? `${r.colorHex}20` : "rgba(255,255,255,0.04)", border: i === activeRecipeIdx ? `1.5px solid ${r.colorHex}` : "1px solid rgba(255,255,255,0.08)" }}>
-                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: r.colorHex }} />
-                  <span className="text-white text-sm font-medium">{r.name}</span>
-                  {i === activeRecipeIdx && <span className="ml-auto text-xs font-semibold" style={{ color: r.colorHex }}>Geselecteerd</span>}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
 
         {recipe && (
           <>
@@ -659,7 +647,7 @@ function OrdersTab() {
                 </button>
               </div>
             ) : (
-              <button onClick={() => { markServed(selectedSession.id); setSelectedId(null); setActiveRecipeIdx(0); }}
+              <button onClick={() => { markServed(selectedSession.id); setSelectedId(null); }}
                 className="w-full rounded-md py-4 text-lg font-bold text-white transition-all duration-200 active:scale-95"
                 style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)", boxShadow: "0 0 32px rgba(16,185,129,0.4)" }}>
                 ✓ Markeer als geserveerd
@@ -694,25 +682,27 @@ function OrdersTab() {
       <div className="flex flex-col gap-2">
         {activeSessions.map((session) => {
           const recipes = session.recipes as AdminRecipe[] | null;
+          const idx = session.selectedRecipeIndex ?? 0;
+          const recipe = recipes?.[idx];
           return (
-            <button key={session.id} onClick={() => { setSelectedId(session.id); setActiveRecipeIdx(0); }}
+            <button key={session.id} onClick={() => setSelectedId(session.id)}
               className="w-full rounded-md overflow-hidden text-left transition-all duration-150 hover:border-white/20"
               style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
               <div className="flex items-center justify-between px-4 py-3.5">
-                <div>
-                  <div className="text-white font-semibold text-sm">{session.guestName ?? "Anoniem"}</div>
-                  <div className="text-white/40 text-xs mt-0.5">
-                    {new Date(session.createdAt).toLocaleDateString("nl-NL")} om{" "}
-                    {new Date(session.createdAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" })}
-                    {recipes?.[0]?.name && <span className="ml-2 text-white/30">· {recipes[0].name}</span>}
+                <div className="flex items-center gap-3 min-w-0">
+                  {recipe?.colorHex && (
+                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: recipe.colorHex }} />
+                  )}
+                  <div className="min-w-0">
+                    <div className="text-white font-semibold text-sm">{session.guestName ?? "Anoniem"}</div>
+                    <div className="text-white/40 text-xs mt-0.5 truncate">
+                      {new Date(session.createdAt).toLocaleDateString("nl-NL")} om{" "}
+                      {new Date(session.createdAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" })}
+                      {recipe?.name && <span className="ml-2 text-white/30">· {recipe.name}</span>}
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {session.completed && (
-                    <span className="text-xs rounded px-2 py-0.5 font-semibold" style={{ background: "rgba(255,107,53,0.2)", color: "#ff6b35" }}>Besteld</span>
-                  )}
-                  <span className="text-white/30 text-sm">→</span>
-                </div>
+                <span className="text-white/30 text-sm flex-shrink-0 ml-2">→</span>
               </div>
             </button>
           );

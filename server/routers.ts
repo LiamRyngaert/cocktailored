@@ -84,6 +84,7 @@ CRITICAL RULES:
 - Never use placeholder text or generic descriptions. Be specific and personal.
 - Do not use em dashes (use commas or periods instead). Do not use the word "AI" or "algorithm" anywhere.
 - Write as if you are a wise, warm bartender who truly knows this person.
+- colorHex MUST be a medium to light color (never very dark). The UI has a black background, so dark colors like #1a0a00 or #0d0020 are invisible. Use vibrant, saturated mid-to-light tones: e.g. #ff6b35, #a855f7, #22d3ee, #f59e0b, #ec4899, #10b981, #6366f1, #f97316, #e879f9, #34d399, #fb923c, #818cf8. Brightness should be at least 40% in HSL.
 
 AVAILABLE INGREDIENTS: ${ingredientList}${allergies && allergies.length > 0 && !allergies.includes("none") ? `\n\nALLERGY RESTRICTIONS — MUST AVOID: ${allergies.join(", ")}. Do NOT include any ingredient related to these restrictions in any of the 3 recipes.` : ""}`;
 
