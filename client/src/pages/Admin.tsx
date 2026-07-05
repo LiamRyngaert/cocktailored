@@ -973,6 +973,55 @@ function QRCodesTab() {
 
 // ── Settings tab ─────────────────────────────────────────────────────────────
 
+function BackendStatusCard() {
+  // Polls the backend every 20s so the bar can see at a glance whether the
+  // site is still linked to its durable database (and not silently running on
+  // the ephemeral in-memory fallback, which loses orders on serverless).
+  const { data, isLoading, isError, dataUpdatedAt } = trpc.system.status.useQuery(undefined, {
+    refetchInterval: 20_000,
+    refetchOnWindowFocus: true,
+    retry: 1,
+  });
+
+  const ok = data?.ok === true;
+  const mode = data?.db.mode;
+  const durable = ok && mode === "database";
+  const color = isLoading ? "#f59e0b" : durable ? "#10b981" : ok && mode === "memory" ? "#f59e0b" : "#ef4444";
+  const label = isLoading
+    ? "Verbinding controleren..."
+    : isError
+      ? "Backend onbereikbaar"
+      : durable
+        ? "Verbonden met database"
+        : mode === "memory"
+          ? "Tijdelijke opslag (NIET veilig)"
+          : "Database onbereikbaar";
+  const sub = isLoading
+    ? "Even geduld"
+    : durable
+      ? `Alles werkt. Reactietijd ${data?.db.latencyMs ?? "?"} ms.`
+      : mode === "memory"
+        ? "Er is geen DATABASE_URL ingesteld. Bestellingen kunnen verloren gaan. Stel een database in via Vercel."
+        : `De database antwoordt niet${data?.db.error ? `: ${data.db.error}` : "."}`;
+  const lastChecked = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : null;
+
+  return (
+    <div className="rounded-md p-5" style={{ background: `${color}12`, border: `1.5px solid ${color}45` }}>
+      <div className="flex items-center gap-3">
+        <div className="relative flex-shrink-0">
+          <div className="w-3 h-3 rounded-full" style={{ background: color, boxShadow: `0 0 10px ${color}` }} />
+          {durable && <div className="absolute inset-0 w-3 h-3 rounded-full animate-ping" style={{ background: color, opacity: 0.6 }} />}
+        </div>
+        <div className="min-w-0">
+          <div className="text-white font-semibold text-sm">{label}</div>
+          <div className="text-white/50 text-xs mt-0.5">{sub}</div>
+          {lastChecked && <div className="text-white/25 text-[10px] mt-1">Laatst gecontroleerd om {lastChecked}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SettingsTab() {
   const { data: settings, refetch } = trpc.admin.getSettings.useQuery();
   const updateMutation = trpc.admin.updateSetting.useMutation({
@@ -988,6 +1037,7 @@ function SettingsTab() {
 
   return (
     <div className="flex flex-col gap-4">
+      <BackendStatusCard />
       <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
         <div className="text-white font-semibold mb-1">WhatsApp Nummer</div>
         <p className="text-white/40 text-xs mb-3">Nummer van de barman voor bestellingsmeldingen.</p>

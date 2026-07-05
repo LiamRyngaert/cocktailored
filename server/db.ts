@@ -1,5 +1,6 @@
-import { and, desc, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { drizzle, type MySql2Database } from "drizzle-orm/mysql2";
+import mysql from "mysql2/promise";
 import {
   InsertIngredient,
   InsertQuizSession,
@@ -12,18 +13,117 @@ import {
 } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
-let _db: ReturnType<typeof drizzle> | null = null;
+type Db = MySql2Database<Record<string, never>>;
 
-export async function getDb() {
-  if (!_db && process.env.DATABASE_URL) {
+// Small pool PER serverless instance. Many instances run concurrently, so the
+// total connection count is (instances x POOL_SIZE) — keep this low so a burst
+// of traffic never exhausts the database's connection limit. Tune via env.
+const POOL_SIZE = Math.max(1, Number(process.env.DB_POOL_SIZE ?? "8") || 8);
+
+// Cache the pool + drizzle instance on globalThis so warm invocations reuse a
+// single pool instead of opening a fresh connection on every request (the main
+// cause of connection exhaustion and "server has gone away" errors on Vercel).
+const g = globalThis as unknown as {
+  __ctPool?: mysql.Pool | null;
+  __ctDb?: Db | null;
+};
+
+function createPool(url: string): mysql.Pool {
+  const pool = mysql.createPool({
+    uri: url,
+    connectionLimit: POOL_SIZE,
+    maxIdle: POOL_SIZE,
+    idleTimeout: 10_000, // release idle connections quickly so bursts don't pile up
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10_000,
+    waitForConnections: true,
+    queueLimit: 0,
+    connectTimeout: 10_000,
+  });
+
+  // Best-effort: let Vercel Fluid Compute gracefully drain idle connections
+  // before a function is suspended. No-op when not running on Vercel or when
+  // the package is unavailable — the pool works fine on its own either way.
+  import("@vercel/functions")
+    .then((vf) => (vf as { attachDatabasePool?: (p: unknown) => void }).attachDatabasePool?.(pool))
+    .catch(() => {});
+
+  // Never let a background connection error crash the process — the pool
+  // transparently reconnects on the next query.
+  (pool as unknown as { on(event: "error", cb: (err: unknown) => void): void })
+    .on("error", (err) => console.error("[Database] pool error (auto-recovering):", err));
+
+  return pool;
+}
+
+export async function getDb(): Promise<Db | null> {
+  if (g.__ctDb) return g.__ctDb;
+  const url = process.env.DATABASE_URL;
+  if (!url) return null;
+  try {
+    if (!g.__ctPool) g.__ctPool = createPool(url);
+    g.__ctDb = drizzle(g.__ctPool);
+    return g.__ctDb;
+  } catch (error) {
+    console.error("[Database] Failed to initialise pool:", error);
+    g.__ctPool = null;
+    g.__ctDb = null;
+    return null;
+  }
+}
+
+// Transient network/connection errors that are safe to retry — a dropped or
+// reset connection is replaced by the pool on the next attempt.
+const TRANSIENT_CODES = new Set([
+  "PROTOCOL_CONNECTION_LOST",
+  "PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR",
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ETIMEDOUT",
+  "EPIPE",
+  "ER_LOCK_DEADLOCK",
+]);
+
+async function withRetry<T>(fn: (db: Db) => Promise<T>, attempts = 3): Promise<T | null> {
+  const db = await getDb();
+  if (!db) return null; // caller's in-memory branch handles this
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
     try {
-      _db = drizzle(process.env.DATABASE_URL);
-    } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
-      _db = null;
+      return await fn(db);
+    } catch (err) {
+      lastErr = err;
+      const code = String((err as { code?: string; errno?: string })?.code ?? (err as { errno?: string })?.errno ?? "");
+      if (!TRANSIENT_CODES.has(code) || i === attempts - 1) throw err;
+      await new Promise((r) => setTimeout(r, 120 * (i + 1)));
     }
   }
-  return _db;
+  throw lastErr;
+}
+
+/**
+ * Live backend status — used by the health endpoint and the admin dashboard to
+ * confirm the app is actually linked to a durable database (and not silently
+ * running on the ephemeral in-memory fallback).
+ */
+export async function getDbStatus(): Promise<{
+  mode: "database" | "memory";
+  ok: boolean;
+  latencyMs: number | null;
+  error?: string;
+}> {
+  if (!process.env.DATABASE_URL) {
+    return { mode: "memory", ok: true, latencyMs: null };
+  }
+  const start = Date.now();
+  try {
+    const db = await getDb();
+    if (!db) return { mode: "database", ok: false, latencyMs: null, error: "pool unavailable" };
+    await db.execute(sql`SELECT 1`);
+    return { mode: "database", ok: true, latencyMs: Date.now() - start };
+  } catch (err) {
+    return { mode: "database", ok: false, latencyMs: null, error: (err as Error).message };
+  }
 }
 
 // ---- In-memory fallback (used when DATABASE_URL is not configured) ----
@@ -87,14 +187,14 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   }
   if (!values.lastSignedIn) values.lastSignedIn = new Date();
   if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = new Date();
-  await db.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet });
+  await withRetry((d) => d.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet }));
 }
 
 export async function getUserByOpenId(openId: string) {
   const db = await getDb();
   if (!db) return undefined;
-  const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
-  return result.length > 0 ? result[0] : undefined;
+  const result = await withRetry((d) => d.select().from(users).where(eq(users.openId, openId)).limit(1));
+  return result && result.length > 0 ? result[0] : undefined;
 }
 
 // ---- Quiz Sessions ----
@@ -105,18 +205,15 @@ export async function createQuizSession(data: InsertQuizSession) {
     _memSessions.set(data.sessionId, { ...data, id: _memSessionCounter++, createdAt: now, updatedAt: now });
     return;
   }
-  await db.insert(quizSessions).values(data);
+  await withRetry((d) => d.insert(quizSessions).values(data));
 }
 
 export async function getQuizSession(sessionId: string) {
   const db = await getDb();
   if (!db) return _memSessions.get(sessionId);
-  const result = await db
-    .select()
-    .from(quizSessions)
-    .where(eq(quizSessions.sessionId, sessionId))
-    .limit(1);
-  return result.length > 0 ? result[0] : undefined;
+  const result = await withRetry((d) =>
+    d.select().from(quizSessions).where(eq(quizSessions.sessionId, sessionId)).limit(1));
+  return result && result.length > 0 ? result[0] : undefined;
 }
 
 export async function updateQuizSession(
@@ -129,30 +226,27 @@ export async function updateQuizSession(
     if (existing) _memSessions.set(sessionId, { ...existing, ...data, updatedAt: new Date() });
     return;
   }
-  await db.update(quizSessions).set(data).where(eq(quizSessions.sessionId, sessionId));
+  await withRetry((d) => d.update(quizSessions).set(data).where(eq(quizSessions.sessionId, sessionId)));
 }
 
 export async function getAllQuizSessions() {
   const db = await getDb();
   if (!db) return Array.from(_memSessions.values()).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(0, 200);
-  return db.select().from(quizSessions).orderBy(desc(quizSessions.createdAt)).limit(200);
+  return (await withRetry((d) => d.select().from(quizSessions).orderBy(desc(quizSessions.createdAt)).limit(200))) ?? [];
 }
 
 // ---- Ingredients ----
 export async function getAllIngredients() {
   const db = await getDb();
   if (!db) return DEFAULT_INGREDIENTS;
-  return db.select().from(ingredients).orderBy(ingredients.category, ingredients.name);
+  return (await withRetry((d) => d.select().from(ingredients).orderBy(ingredients.category, ingredients.name))) ?? [];
 }
 
 export async function getAvailableIngredients() {
   const db = await getDb();
   if (!db) return DEFAULT_INGREDIENTS.filter((i) => i.available);
-  return db
-    .select()
-    .from(ingredients)
-    .where(eq(ingredients.available, true))
-    .orderBy(ingredients.category, ingredients.name);
+  return (await withRetry((d) =>
+    d.select().from(ingredients).where(eq(ingredients.available, true)).orderBy(ingredients.category, ingredients.name))) ?? [];
 }
 
 export async function updateIngredientAvailability(id: number, available: boolean) {
@@ -162,7 +256,7 @@ export async function updateIngredientAvailability(id: number, available: boolea
     if (ing) ing.available = available;
     return;
   }
-  await db.update(ingredients).set({ available }).where(eq(ingredients.id, id));
+  await withRetry((d) => d.update(ingredients).set({ available }).where(eq(ingredients.id, id)));
 }
 
 export async function addCustomIngredient(data: InsertIngredient) {
@@ -171,7 +265,7 @@ export async function addCustomIngredient(data: InsertIngredient) {
     DEFAULT_INGREDIENTS.push({ ...data, available: data.available ?? true, id: DEFAULT_INGREDIENTS.length + 1, isCustom: true, createdAt: new Date() });
     return;
   }
-  await db.insert(ingredients).values({ ...data, isCustom: true });
+  await withRetry((d) => d.insert(ingredients).values({ ...data, isCustom: true }));
 }
 
 export async function deleteIngredient(id: number) {
@@ -181,39 +275,33 @@ export async function deleteIngredient(id: number) {
     if (idx >= 0) DEFAULT_INGREDIENTS.splice(idx, 1);
     return;
   }
-  await db.delete(ingredients).where(and(eq(ingredients.id, id), eq(ingredients.isCustom, true)));
+  await withRetry((d) => d.delete(ingredients).where(and(eq(ingredients.id, id), eq(ingredients.isCustom, true))));
 }
 
 // ---- Admin Settings ----
 export async function getAdminSetting(key: string): Promise<string | null> {
   const db = await getDb();
   if (!db) return _memSettings.get(key) ?? null;
-  const result = await db
-    .select()
-    .from(adminSettings)
-    .where(eq(adminSettings.key, key))
-    .limit(1);
-  return result.length > 0 ? (result[0].value ?? null) : null;
+  const result = await withRetry((d) =>
+    d.select().from(adminSettings).where(eq(adminSettings.key, key)).limit(1));
+  return result && result.length > 0 ? (result[0].value ?? null) : null;
 }
 
 export async function setAdminSetting(key: string, value: string) {
   const db = await getDb();
   if (!db) { _memSettings.set(key, value); return; }
-  await db
-    .insert(adminSettings)
-    .values({ key, value })
-    .onDuplicateKeyUpdate({ set: { value } });
+  await withRetry((d) => d.insert(adminSettings).values({ key, value }).onDuplicateKeyUpdate({ set: { value } }));
 }
 
 export async function getAllAdminSettings() {
   const db = await getDb();
   if (!db) return Array.from(_memSettings.entries()).map(([key, value], id) => ({ id, key, value, updatedAt: new Date() }));
-  return db.select().from(adminSettings);
+  return (await withRetry((d) => d.select().from(adminSettings))) ?? [];
 }
 
 // ---- Reviews ----
 export async function getAllReviews() {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(reviews).orderBy(reviews.createdAt);
+  return (await withRetry((d) => d.select().from(reviews).orderBy(reviews.createdAt))) ?? [];
 }

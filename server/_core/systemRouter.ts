@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { getDbStatus } from "../db";
 import { notifyOwner } from "./notification";
 import { adminProcedure, publicProcedure, router } from "./trpc";
 
@@ -12,6 +13,16 @@ export const systemRouter = router({
     .query(() => ({
       ok: true,
     })),
+
+  /**
+   * Live backend status — confirms the app is linked to a durable database and
+   * measures round-trip latency. Powers the admin "Backend status" widget and
+   * any external uptime monitor pointed at the /api/health route.
+   */
+  status: publicProcedure.query(async () => {
+    const db = await getDbStatus();
+    return { ok: db.ok, db, timestamp: Date.now() };
+  }),
 
   notifyOwner: adminProcedure
     .input(

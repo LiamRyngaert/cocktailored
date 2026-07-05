@@ -4,12 +4,29 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { appRouter } from "../server/routers";
 import { createContext } from "../server/_core/context";
 import { registerStorageProxy } from "../server/_core/storageProxy";
+import { getDbStatus } from "../server/db";
 
 const app = express();
 
 app.disable("x-powered-by");
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
+// Health check for uptime monitors / load balancers. Returns 200 when the
+// backend is linked to a durable database, 503 when the database is down so an
+// external monitor can alert. Never throws.
+app.get("/api/health", async (_req: Request, res: Response) => {
+  try {
+    const status = await getDbStatus();
+    res.status(status.ok ? 200 : 503).json({
+      status: status.ok ? "ok" : "degraded",
+      ...status,
+      time: new Date().toISOString(),
+    });
+  } catch (err) {
+    res.status(503).json({ status: "error", error: (err as Error).message });
+  }
+});
 
 // Security headers for API responses
 app.use((_req: Request, res: Response, next: NextFunction) => {
