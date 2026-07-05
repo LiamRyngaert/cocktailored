@@ -458,9 +458,19 @@ var reviews = mysqlTable("reviews", {
 // server/db.ts
 var POOL_SIZE = Math.max(1, Number(process.env.DB_POOL_SIZE ?? "8") || 8);
 var g = globalThis;
+function resolveSsl(url) {
+  const flag = (process.env.DB_SSL ?? "").toLowerCase();
+  if (flag === "false" || flag === "0" || flag === "off") return void 0;
+  const managed = /psdb\.cloud|planetscale|aivencloud\.com|\.rds\.amazonaws\.com|azure|scalegrid|sslmode=require|sslaccept|ssl=true/i;
+  if (flag === "true" || flag === "1" || flag === "on" || managed.test(url)) {
+    return { rejectUnauthorized: true };
+  }
+  return void 0;
+}
 function createPool(url) {
   const pool = mysql.createPool({
     uri: url,
+    ssl: resolveSsl(url),
     connectionLimit: POOL_SIZE,
     maxIdle: POOL_SIZE,
     idleTimeout: 1e4,
@@ -482,7 +492,9 @@ async function getDb() {
   if (!url) return null;
   try {
     if (!g.__ctPool) g.__ctPool = createPool(url);
-    g.__ctDb = drizzle(g.__ctPool);
+    const db = drizzle(g.__ctPool);
+    await ensureSchemaOnce(db);
+    g.__ctDb = db;
     return g.__ctDb;
   } catch (error) {
     console.error("[Database] Failed to initialise pool:", error);
@@ -490,6 +502,11 @@ async function getDb() {
     g.__ctDb = null;
     return null;
   }
+}
+function ensureSchemaOnce(db) {
+  return g.__ctSchemaReady ??= ensureSchema(db).catch((err) => {
+    logError("db", "schema bootstrap failed (continuing)", { error: String(err) });
+  });
 }
 var TRANSIENT_CODES = /* @__PURE__ */ new Set([
   "PROTOCOL_CONNECTION_LOST",
@@ -580,6 +597,87 @@ var DEFAULT_INGREDIENTS = [
   { id: 24, name: "Mint", category: "garnishes", available: true, isCustom: false, createdAt: /* @__PURE__ */ new Date() },
   { id: 25, name: "Lime Wedge", category: "garnishes", available: true, isCustom: false, createdAt: /* @__PURE__ */ new Date() }
 ];
+var SCHEMA_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    openId VARCHAR(64) NOT NULL,
+    name TEXT,
+    email VARCHAR(320),
+    loginMethod VARCHAR(64),
+    role ENUM('user','admin') NOT NULL DEFAULT 'user',
+    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    lastSignedIn TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY users_openId_unique (openId)
+  )`,
+  `CREATE TABLE IF NOT EXISTS quiz_sessions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    sessionId VARCHAR(64) NOT NULL,
+    guestName VARCHAR(128),
+    answers JSON NOT NULL,
+    flavorProfile JSON,
+    recipes JSON,
+    selectedRecipeIndex INT DEFAULT 0,
+    orderEmail VARCHAR(320),
+    orderPhone VARCHAR(64),
+    orderSubmitted BOOLEAN NOT NULL DEFAULT FALSE,
+    webhookSent BOOLEAN NOT NULL DEFAULT FALSE,
+    completed BOOLEAN NOT NULL DEFAULT FALSE,
+    consentComms BOOLEAN DEFAULT FALSE,
+    consentDataSharing BOOLEAN DEFAULT FALSE,
+    consentFormVersion VARCHAR(16),
+    consentIp VARCHAR(64),
+    consentTimestamp TIMESTAMP NULL,
+    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY quiz_sessions_sessionId_unique (sessionId),
+    KEY quiz_sessions_created_at_idx (createdAt),
+    KEY quiz_sessions_order_submitted_idx (orderSubmitted)
+  )`,
+  `CREATE TABLE IF NOT EXISTS ingredients (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(128) NOT NULL,
+    category VARCHAR(64) NOT NULL,
+    available BOOLEAN NOT NULL DEFAULT TRUE,
+    isCustom BOOLEAN NOT NULL DEFAULT FALSE,
+    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY ingredients_available_idx (available),
+    KEY ingredients_category_idx (category)
+  )`,
+  `CREATE TABLE IF NOT EXISTS admin_settings (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    \`key\` VARCHAR(64) NOT NULL,
+    value TEXT,
+    updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY admin_settings_key_unique (\`key\`)
+  )`,
+  `CREATE TABLE IF NOT EXISTS reviews (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(64) NOT NULL,
+    \`text\` TEXT NOT NULL,
+    rating INT NOT NULL DEFAULT 5,
+    color VARCHAR(32) NOT NULL DEFAULT '#ff6b35',
+    emoji VARCHAR(8) NOT NULL DEFAULT '',
+    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`
+];
+async function ensureSchema(db) {
+  for (const stmt of SCHEMA_STATEMENTS) {
+    await withTimeout(db.execute(sql.raw(stmt)), 15e3, "schema bootstrap");
+  }
+  const countRows = await withTimeout(
+    db.execute(sql`SELECT COUNT(*) AS c FROM ingredients`),
+    1e4,
+    "ingredient count"
+  );
+  const count = Number(countRows?.[0]?.[0]?.c ?? 0);
+  if (count === 0) {
+    await db.insert(ingredients).values(
+      DEFAULT_INGREDIENTS.map((i) => ({ name: i.name, category: i.category, available: i.available, isCustom: false }))
+    );
+    logInfo("db", "seeded default ingredients", { count: DEFAULT_INGREDIENTS.length });
+  }
+}
 async function upsertUser(user) {
   if (!user.openId) throw new Error("User openId is required for upsert");
   const db = await getDb();

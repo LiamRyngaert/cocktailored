@@ -13,7 +13,7 @@ import {
   reviews,
   users,
 } from "../drizzle/schema";
-import { CircuitBreaker, TTLCache, logError, retry, singleton, withTimeout, TimeoutError } from "./_core/reliability";
+import { CircuitBreaker, TTLCache, logError, logInfo, retry, singleton, withTimeout, TimeoutError } from "./_core/reliability";
 
 type Db = MySql2Database<Record<string, never>>;
 
@@ -28,11 +28,26 @@ const POOL_SIZE = Math.max(1, Number(process.env.DB_POOL_SIZE ?? "8") || 8);
 const g = globalThis as unknown as {
   __ctPool?: mysql.Pool | null;
   __ctDb?: Db | null;
+  __ctSchemaReady?: Promise<void>;
 };
+
+// Managed MySQL providers (PlanetScale, Aiven, RDS, Azure…) require TLS. Enable
+// it automatically for those hosts so the connection "just works", while a
+// plain self-hosted MySQL without TLS keeps working. Force with DB_SSL=true|false.
+function resolveSsl(url: string): { rejectUnauthorized: boolean } | undefined {
+  const flag = (process.env.DB_SSL ?? "").toLowerCase();
+  if (flag === "false" || flag === "0" || flag === "off") return undefined;
+  const managed = /psdb\.cloud|planetscale|aivencloud\.com|\.rds\.amazonaws\.com|azure|scalegrid|sslmode=require|sslaccept|ssl=true/i;
+  if (flag === "true" || flag === "1" || flag === "on" || managed.test(url)) {
+    return { rejectUnauthorized: true };
+  }
+  return undefined;
+}
 
 function createPool(url: string): mysql.Pool {
   const pool = mysql.createPool({
     uri: url,
+    ssl: resolveSsl(url),
     connectionLimit: POOL_SIZE,
     maxIdle: POOL_SIZE,
     idleTimeout: 10_000, // release idle connections quickly so bursts don't pile up
@@ -64,7 +79,12 @@ export async function getDb(): Promise<Db | null> {
   if (!url) return null;
   try {
     if (!g.__ctPool) g.__ctPool = createPool(url);
-    g.__ctDb = drizzle(g.__ctPool);
+    const db = drizzle(g.__ctPool);
+    // Ensure tables + indexes exist (and seed defaults) exactly once per
+    // instance, so a freshly configured database works without a manual
+    // migration step. Non-fatal: if it fails, real queries surface the error.
+    await ensureSchemaOnce(db);
+    g.__ctDb = db;
     return g.__ctDb;
   } catch (error) {
     console.error("[Database] Failed to initialise pool:", error);
@@ -72,6 +92,12 @@ export async function getDb(): Promise<Db | null> {
     g.__ctDb = null;
     return null;
   }
+}
+
+function ensureSchemaOnce(db: Db): Promise<void> {
+  return (g.__ctSchemaReady ??= ensureSchema(db).catch((err) => {
+    logError("db", "schema bootstrap failed (continuing)", { error: String(err) });
+  }));
 }
 
 // Transient network/connection errors that are safe to retry — a dropped or
@@ -192,6 +218,96 @@ const DEFAULT_INGREDIENTS: Array<{ id: number; name: string; category: string; a
   { id: 24, name: "Mint", category: "garnishes", available: true, isCustom: false, createdAt: new Date() },
   { id: 25, name: "Lime Wedge", category: "garnishes", available: true, isCustom: false, createdAt: new Date() },
 ];
+
+// ---- Schema bootstrap (idempotent auto-migration) ───────────────────────────
+// Creates every table + index if missing and seeds the default ingredient list
+// on an empty database. Uses CREATE TABLE IF NOT EXISTS so it is safe to run on
+// every cold start and never touches existing data — the app works on a freshly
+// provisioned database without a separate `pnpm db:push` step.
+const SCHEMA_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    openId VARCHAR(64) NOT NULL,
+    name TEXT,
+    email VARCHAR(320),
+    loginMethod VARCHAR(64),
+    role ENUM('user','admin') NOT NULL DEFAULT 'user',
+    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    lastSignedIn TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY users_openId_unique (openId)
+  )`,
+  `CREATE TABLE IF NOT EXISTS quiz_sessions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    sessionId VARCHAR(64) NOT NULL,
+    guestName VARCHAR(128),
+    answers JSON NOT NULL,
+    flavorProfile JSON,
+    recipes JSON,
+    selectedRecipeIndex INT DEFAULT 0,
+    orderEmail VARCHAR(320),
+    orderPhone VARCHAR(64),
+    orderSubmitted BOOLEAN NOT NULL DEFAULT FALSE,
+    webhookSent BOOLEAN NOT NULL DEFAULT FALSE,
+    completed BOOLEAN NOT NULL DEFAULT FALSE,
+    consentComms BOOLEAN DEFAULT FALSE,
+    consentDataSharing BOOLEAN DEFAULT FALSE,
+    consentFormVersion VARCHAR(16),
+    consentIp VARCHAR(64),
+    consentTimestamp TIMESTAMP NULL,
+    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY quiz_sessions_sessionId_unique (sessionId),
+    KEY quiz_sessions_created_at_idx (createdAt),
+    KEY quiz_sessions_order_submitted_idx (orderSubmitted)
+  )`,
+  `CREATE TABLE IF NOT EXISTS ingredients (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(128) NOT NULL,
+    category VARCHAR(64) NOT NULL,
+    available BOOLEAN NOT NULL DEFAULT TRUE,
+    isCustom BOOLEAN NOT NULL DEFAULT FALSE,
+    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY ingredients_available_idx (available),
+    KEY ingredients_category_idx (category)
+  )`,
+  `CREATE TABLE IF NOT EXISTS admin_settings (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    \`key\` VARCHAR(64) NOT NULL,
+    value TEXT,
+    updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY admin_settings_key_unique (\`key\`)
+  )`,
+  `CREATE TABLE IF NOT EXISTS reviews (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(64) NOT NULL,
+    \`text\` TEXT NOT NULL,
+    rating INT NOT NULL DEFAULT 5,
+    color VARCHAR(32) NOT NULL DEFAULT '#ff6b35',
+    emoji VARCHAR(8) NOT NULL DEFAULT '',
+    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+];
+
+async function ensureSchema(db: Db): Promise<void> {
+  for (const stmt of SCHEMA_STATEMENTS) {
+    await withTimeout(db.execute(sql.raw(stmt)), 15_000, "schema bootstrap");
+  }
+  // Seed the default ingredient list on an empty table so the quiz has stock to
+  // work with out of the box (the admin can then toggle/add its own).
+  const countRows = (await withTimeout(
+    db.execute(sql`SELECT COUNT(*) AS c FROM ingredients`),
+    10_000,
+    "ingredient count"
+  )) as unknown as [Array<{ c: number | string }>];
+  const count = Number(countRows?.[0]?.[0]?.c ?? 0);
+  if (count === 0) {
+    await db.insert(ingredients).values(
+      DEFAULT_INGREDIENTS.map((i) => ({ name: i.name, category: i.category, available: i.available, isCustom: false }))
+    );
+    logInfo("db", "seeded default ingredients", { count: DEFAULT_INGREDIENTS.length });
+  }
+}
 
 // ---- Users ----
 export async function upsertUser(user: InsertUser): Promise<void> {
