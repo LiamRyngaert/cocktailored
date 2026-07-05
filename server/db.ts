@@ -2,16 +2,18 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { drizzle, type MySql2Database } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import {
+  type Ingredient,
   InsertIngredient,
   InsertQuizSession,
   InsertUser,
+  type Review,
   adminSettings,
   ingredients,
   quizSessions,
   reviews,
   users,
 } from "../drizzle/schema";
-import { ENV } from "./_core/env";
+import { CircuitBreaker, TTLCache, logError, retry, singleton, withTimeout, TimeoutError } from "./_core/reliability";
 
 type Db = MySql2Database<Record<string, never>>;
 
@@ -84,21 +86,53 @@ const TRANSIENT_CODES = new Set([
   "ER_LOCK_DEADLOCK",
 ]);
 
-async function withRetry<T>(fn: (db: Db) => Promise<T>, attempts = 3): Promise<T | null> {
+function isTransient(err: unknown): boolean {
+  if (err instanceof TimeoutError) return true;
+  const code = String((err as { code?: string; errno?: string })?.code ?? (err as { errno?: string })?.errno ?? "");
+  return TRANSIENT_CODES.has(code);
+}
+
+// Per-instance circuit breaker: after repeated DB failures, stop issuing
+// queries for a short cooldown so a struggling database is not hammered while
+// it recovers — requests fail fast (and cached reads still succeed) instead.
+const dbBreaker = singleton("dbBreaker", () => new CircuitBreaker(5, 10_000));
+const QUERY_TIMEOUT_MS = Math.max(1_000, Number(process.env.DB_QUERY_TIMEOUT_MS ?? "8000") || 8_000);
+
+async function withRetry<T>(fn: (db: Db) => Promise<T>): Promise<T | null> {
   const db = await getDb();
   if (!db) return null; // caller's in-memory branch handles this
-  let lastErr: unknown;
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return await fn(db);
-    } catch (err) {
-      lastErr = err;
-      const code = String((err as { code?: string; errno?: string })?.code ?? (err as { errno?: string })?.errno ?? "");
-      if (!TRANSIENT_CODES.has(code) || i === attempts - 1) throw err;
-      await new Promise((r) => setTimeout(r, 120 * (i + 1)));
-    }
+  if (!dbBreaker.canPass()) {
+    logError("db", "circuit open — failing fast");
+    throw new Error("Database temporarily unavailable");
   }
-  throw lastErr;
+  try {
+    // Time-box every query so one stuck connection can never hang a request,
+    // and retry transient failures with jittered exponential backoff.
+    const result = await retry(() => withTimeout(fn(db), QUERY_TIMEOUT_MS, "db query"), {
+      attempts: 3,
+      baseMs: 120,
+      maxMs: 1_500,
+      isRetryable: isTransient,
+    });
+    dbBreaker.onSuccess();
+    return result;
+  } catch (err) {
+    dbBreaker.onFailure();
+    throw err;
+  }
+}
+
+// ── read caches (per instance, short TTL) ─────────────────────────────────────
+// Absorb read-heavy traffic (reviews, ingredient lists, settings) so a spike of
+// concurrent users does not translate into a matching spike of DB queries.
+const reviewsCache = singleton("reviewsCache", () => new TTLCache<Review[]>(60_000));
+const availIngredientsCache = singleton("availIngredientsCache", () => new TTLCache<Ingredient[]>(20_000));
+const allIngredientsCache = singleton("allIngredientsCache", () => new TTLCache<Ingredient[]>(10_000));
+const settingsCache = singleton("settingsCache", () => new TTLCache<string | null>(30_000));
+
+function invalidateIngredientCaches(): void {
+  availIngredientsCache.clear();
+  allIngredientsCache.clear();
 }
 
 /**
@@ -202,6 +236,12 @@ export async function createQuizSession(data: InsertQuizSession) {
   const db = await getDb();
   if (!db) {
     const now = new Date();
+    // Bound the in-memory fallback so a long-running dev/process can't leak
+    // memory: evict the oldest session once we exceed the cap.
+    if (_memSessions.size >= 5_000) {
+      const oldest = _memSessions.keys().next().value;
+      if (oldest !== undefined) _memSessions.delete(oldest);
+    }
     _memSessions.set(data.sessionId, { ...data, id: _memSessionCounter++, createdAt: now, updatedAt: now });
     return;
   }
@@ -239,14 +279,16 @@ export async function getAllQuizSessions() {
 export async function getAllIngredients() {
   const db = await getDb();
   if (!db) return DEFAULT_INGREDIENTS;
-  return (await withRetry((d) => d.select().from(ingredients).orderBy(ingredients.category, ingredients.name))) ?? [];
+  return allIngredientsCache.wrap("all", async () =>
+    (await withRetry((d) => d.select().from(ingredients).orderBy(ingredients.category, ingredients.name))) ?? []);
 }
 
 export async function getAvailableIngredients() {
   const db = await getDb();
   if (!db) return DEFAULT_INGREDIENTS.filter((i) => i.available);
-  return (await withRetry((d) =>
-    d.select().from(ingredients).where(eq(ingredients.available, true)).orderBy(ingredients.category, ingredients.name))) ?? [];
+  return availIngredientsCache.wrap("all", async () =>
+    (await withRetry((d) =>
+      d.select().from(ingredients).where(eq(ingredients.available, true)).orderBy(ingredients.category, ingredients.name))) ?? []);
 }
 
 export async function updateIngredientAvailability(id: number, available: boolean) {
@@ -257,6 +299,7 @@ export async function updateIngredientAvailability(id: number, available: boolea
     return;
   }
   await withRetry((d) => d.update(ingredients).set({ available }).where(eq(ingredients.id, id)));
+  invalidateIngredientCaches();
 }
 
 export async function addCustomIngredient(data: InsertIngredient) {
@@ -266,6 +309,7 @@ export async function addCustomIngredient(data: InsertIngredient) {
     return;
   }
   await withRetry((d) => d.insert(ingredients).values({ ...data, isCustom: true }));
+  invalidateIngredientCaches();
 }
 
 export async function deleteIngredient(id: number) {
@@ -276,21 +320,25 @@ export async function deleteIngredient(id: number) {
     return;
   }
   await withRetry((d) => d.delete(ingredients).where(and(eq(ingredients.id, id), eq(ingredients.isCustom, true))));
+  invalidateIngredientCaches();
 }
 
 // ---- Admin Settings ----
 export async function getAdminSetting(key: string): Promise<string | null> {
   const db = await getDb();
   if (!db) return _memSettings.get(key) ?? null;
-  const result = await withRetry((d) =>
-    d.select().from(adminSettings).where(eq(adminSettings.key, key)).limit(1));
-  return result && result.length > 0 ? (result[0].value ?? null) : null;
+  return settingsCache.wrap(key, async () => {
+    const result = await withRetry((d) =>
+      d.select().from(adminSettings).where(eq(adminSettings.key, key)).limit(1));
+    return result && result.length > 0 ? (result[0].value ?? null) : null;
+  });
 }
 
 export async function setAdminSetting(key: string, value: string) {
   const db = await getDb();
   if (!db) { _memSettings.set(key, value); return; }
   await withRetry((d) => d.insert(adminSettings).values({ key, value }).onDuplicateKeyUpdate({ set: { value } }));
+  settingsCache.delete(key);
 }
 
 export async function getAllAdminSettings() {
@@ -303,5 +351,6 @@ export async function getAllAdminSettings() {
 export async function getAllReviews() {
   const db = await getDb();
   if (!db) return [];
-  return (await withRetry((d) => d.select().from(reviews).orderBy(reviews.createdAt))) ?? [];
+  return reviewsCache.wrap("all", async () =>
+    (await withRetry((d) => d.select().from(reviews).orderBy(reviews.createdAt))) ?? []);
 }

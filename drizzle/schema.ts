@@ -1,5 +1,6 @@
 import {
   boolean,
+  index,
   int,
   json,
   mysqlEnum,
@@ -47,7 +48,11 @@ export const quizSessions = mysqlTable("quiz_sessions", {
   consentTimestamp: timestamp("consentTimestamp"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, (t) => ({
+  // Admin list orders by newest first and filters to submitted orders.
+  createdAtIdx: index("quiz_sessions_created_at_idx").on(t.createdAt),
+  orderSubmittedIdx: index("quiz_sessions_order_submitted_idx").on(t.orderSubmitted),
+}));
 
 export type QuizSession = typeof quizSessions.$inferSelect;
 export type InsertQuizSession = typeof quizSessions.$inferInsert;
@@ -60,7 +65,11 @@ export const ingredients = mysqlTable("ingredients", {
   available: boolean("available").default(true).notNull(),
   isCustom: boolean("isCustom").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, (t) => ({
+  // Reads filter on availability and order by category.
+  availableIdx: index("ingredients_available_idx").on(t.available),
+  categoryIdx: index("ingredients_category_idx").on(t.category),
+}));
 
 export type Ingredient = typeof ingredients.$inferSelect;
 export type InsertIngredient = typeof ingredients.$inferInsert;

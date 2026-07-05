@@ -55,10 +55,18 @@ var ENV = {
 
 // server/_core/llm.ts
 import Anthropic from "@anthropic-ai/sdk";
+var _client = null;
 function getClient() {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) throw new Error("ANTHROPIC_API_KEY is not configured");
-  return new Anthropic({ apiKey: key });
+  if (!_client) {
+    _client = new Anthropic({
+      apiKey: key,
+      maxRetries: Math.max(0, Number(process.env.LLM_MAX_RETRIES ?? "2") || 2),
+      timeout: Math.max(5e3, Number(process.env.LLM_TIMEOUT_MS ?? "45000") || 45e3)
+    });
+  }
+  return _client;
 }
 function convertImageUrl(url) {
   if (url.startsWith("data:")) {
@@ -147,6 +155,216 @@ Return only the raw JSON object \u2014 no markdown fences.`;
   };
 }
 
+// server/_core/reliability.ts
+var store = globalThis.__ctReliability ??= {};
+function singleton(key, create) {
+  if (!(key in store)) store[key] = create();
+  return store[key];
+}
+var TimeoutError = class extends Error {
+  constructor(label, ms) {
+    super(`${label} timed out after ${ms}ms`);
+    this.name = "TimeoutError";
+  }
+};
+function withTimeout(promise, ms, label = "operation") {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new TimeoutError(label, ms)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+async function retry(fn, opts = {}) {
+  const { attempts = 3, baseMs = 120, maxMs = 2e3, isRetryable = () => true, onRetry } = opts;
+  let lastErr;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (attempt === attempts || !isRetryable(err)) throw err;
+      onRetry?.(err, attempt);
+      const ceiling = Math.min(maxMs, baseMs * 2 ** (attempt - 1));
+      const delay = Math.floor(Math.random() * ceiling);
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+var CircuitBreaker = class {
+  constructor(threshold, cooldownMs) {
+    this.threshold = threshold;
+    this.cooldownMs = cooldownMs;
+  }
+  failures = 0;
+  state = "closed";
+  openedAt = 0;
+  /** Whether a call may proceed right now. */
+  canPass() {
+    if (this.state === "open") {
+      if (Date.now() - this.openedAt >= this.cooldownMs) {
+        this.state = "half-open";
+        return true;
+      }
+      return false;
+    }
+    return true;
+  }
+  onSuccess() {
+    this.failures = 0;
+    this.state = "closed";
+  }
+  onFailure() {
+    this.failures++;
+    if (this.state === "half-open" || this.failures >= this.threshold) {
+      this.state = "open";
+      this.openedAt = Date.now();
+    }
+  }
+  get open() {
+    return this.state === "open" && Date.now() - this.openedAt < this.cooldownMs;
+  }
+};
+var RateLimiter = class {
+  constructor(capacity, refillPerSec) {
+    this.capacity = capacity;
+    this.refillPerSec = refillPerSec;
+  }
+  buckets = /* @__PURE__ */ new Map();
+  lastSweep = Date.now();
+  take(key, cost = 1) {
+    const now = Date.now();
+    this.maybeSweep(now);
+    let b = this.buckets.get(key);
+    if (!b) {
+      b = { tokens: this.capacity, updated: now };
+      this.buckets.set(key, b);
+    }
+    const elapsedSec = (now - b.updated) / 1e3;
+    b.tokens = Math.min(this.capacity, b.tokens + elapsedSec * this.refillPerSec);
+    b.updated = now;
+    if (b.tokens >= cost) {
+      b.tokens -= cost;
+      return { ok: true, retryAfterMs: 0 };
+    }
+    const deficit = cost - b.tokens;
+    return { ok: false, retryAfterMs: Math.ceil(deficit / this.refillPerSec * 1e3) };
+  }
+  // Drop stale buckets so the map never grows unbounded under many unique IPs.
+  maybeSweep(now) {
+    if (now - this.lastSweep < 6e4 && this.buckets.size < 1e4) return;
+    this.lastSweep = now;
+    const stale = [];
+    this.buckets.forEach((b, key) => {
+      if (now - b.updated > 6e5) stale.push(key);
+    });
+    stale.forEach((key) => this.buckets.delete(key));
+  }
+};
+var TTLCache = class {
+  constructor(ttlMs, max = 1e3) {
+    this.ttlMs = ttlMs;
+    this.max = max;
+  }
+  map = /* @__PURE__ */ new Map();
+  get(key) {
+    const e = this.map.get(key);
+    if (!e) return void 0;
+    if (Date.now() > e.expires) {
+      this.map.delete(key);
+      return void 0;
+    }
+    return e.value;
+  }
+  set(key, value) {
+    if (this.map.size >= this.max) {
+      const oldest = this.map.keys().next().value;
+      if (oldest !== void 0) this.map.delete(oldest);
+    }
+    this.map.set(key, { value, expires: Date.now() + this.ttlMs });
+  }
+  /** Serve from cache, or run the loader and cache its result. */
+  async wrap(key, loader) {
+    const hit = this.get(key);
+    if (hit !== void 0) return hit;
+    const value = await loader();
+    this.set(key, value);
+    return value;
+  }
+  delete(key) {
+    this.map.delete(key);
+  }
+  clear() {
+    this.map.clear();
+  }
+};
+function requestId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+function logInfo(scope, msg, extra) {
+  console.log(JSON.stringify({ level: "info", ts: (/* @__PURE__ */ new Date()).toISOString(), scope, msg, ...extra }));
+}
+function logError(scope, msg, extra) {
+  console.error(JSON.stringify({ level: "error", ts: (/* @__PURE__ */ new Date()).toISOString(), scope, msg, ...extra }));
+}
+var _waitUntil;
+async function resolveWaitUntil() {
+  if (_waitUntil !== void 0) return _waitUntil;
+  try {
+    const vf = await import("@vercel/functions");
+    _waitUntil = vf.waitUntil ?? null;
+  } catch {
+    _waitUntil = null;
+  }
+  return _waitUntil;
+}
+function runBackground(fn) {
+  const p = Promise.resolve().then(fn).catch((err) => logError("background", "task failed", { error: String(err) }));
+  resolveWaitUntil().then((wu) => {
+    try {
+      wu?.(p);
+    } catch {
+    }
+  });
+}
+async function deliverWebhook(url, payload, opts = {}) {
+  const { attempts = 4, timeoutMs = 8e3, label = "webhook" } = opts;
+  const body = JSON.stringify(payload);
+  try {
+    await retry(
+      async () => {
+        const res = await withTimeout(
+          fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body
+          }),
+          timeoutMs,
+          label
+        );
+        if (!res.ok && (res.status >= 500 || res.status === 429)) {
+          throw new Error(`${label} HTTP ${res.status}`);
+        }
+        if (!res.ok) {
+          logError(label, `non-retryable HTTP ${res.status}`);
+        }
+        return res;
+      },
+      {
+        attempts,
+        baseMs: 300,
+        maxMs: 5e3,
+        onRetry: (err, attempt) => logError(label, `attempt ${attempt} failed`, { error: String(err) })
+      }
+    );
+    logInfo(label, "delivered");
+    return true;
+  } catch (err) {
+    logError(label, "all attempts exhausted", { error: String(err) });
+    return false;
+  }
+}
+
 // server/_core/systemRouter.ts
 import { z } from "zod";
 
@@ -158,6 +376,7 @@ import mysql from "mysql2/promise";
 // drizzle/schema.ts
 import {
   boolean,
+  index,
   int,
   json,
   mysqlEnum,
@@ -202,7 +421,11 @@ var quizSessions = mysqlTable("quiz_sessions", {
   consentTimestamp: timestamp("consentTimestamp"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
-});
+}, (t2) => ({
+  // Admin list orders by newest first and filters to submitted orders.
+  createdAtIdx: index("quiz_sessions_created_at_idx").on(t2.createdAt),
+  orderSubmittedIdx: index("quiz_sessions_order_submitted_idx").on(t2.orderSubmitted)
+}));
 var ingredients = mysqlTable("ingredients", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 128 }).notNull(),
@@ -211,7 +434,11 @@ var ingredients = mysqlTable("ingredients", {
   available: boolean("available").default(true).notNull(),
   isCustom: boolean("isCustom").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull()
-});
+}, (t2) => ({
+  // Reads filter on availability and order by category.
+  availableIdx: index("ingredients_available_idx").on(t2.available),
+  categoryIdx: index("ingredients_category_idx").on(t2.category)
+}));
 var adminSettings = mysqlTable("admin_settings", {
   id: int("id").autoincrement().primaryKey(),
   key: varchar("key", { length: 64 }).notNull().unique(),
@@ -273,21 +500,41 @@ var TRANSIENT_CODES = /* @__PURE__ */ new Set([
   "EPIPE",
   "ER_LOCK_DEADLOCK"
 ]);
-async function withRetry(fn, attempts = 3) {
+function isTransient(err) {
+  if (err instanceof TimeoutError) return true;
+  const code = String(err?.code ?? err?.errno ?? "");
+  return TRANSIENT_CODES.has(code);
+}
+var dbBreaker = singleton("dbBreaker", () => new CircuitBreaker(5, 1e4));
+var QUERY_TIMEOUT_MS = Math.max(1e3, Number(process.env.DB_QUERY_TIMEOUT_MS ?? "8000") || 8e3);
+async function withRetry(fn) {
   const db = await getDb();
   if (!db) return null;
-  let lastErr;
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return await fn(db);
-    } catch (err) {
-      lastErr = err;
-      const code = String(err?.code ?? err?.errno ?? "");
-      if (!TRANSIENT_CODES.has(code) || i === attempts - 1) throw err;
-      await new Promise((r) => setTimeout(r, 120 * (i + 1)));
-    }
+  if (!dbBreaker.canPass()) {
+    logError("db", "circuit open \u2014 failing fast");
+    throw new Error("Database temporarily unavailable");
   }
-  throw lastErr;
+  try {
+    const result = await retry(() => withTimeout(fn(db), QUERY_TIMEOUT_MS, "db query"), {
+      attempts: 3,
+      baseMs: 120,
+      maxMs: 1500,
+      isRetryable: isTransient
+    });
+    dbBreaker.onSuccess();
+    return result;
+  } catch (err) {
+    dbBreaker.onFailure();
+    throw err;
+  }
+}
+var reviewsCache = singleton("reviewsCache", () => new TTLCache(6e4));
+var availIngredientsCache = singleton("availIngredientsCache", () => new TTLCache(2e4));
+var allIngredientsCache = singleton("allIngredientsCache", () => new TTLCache(1e4));
+var settingsCache = singleton("settingsCache", () => new TTLCache(3e4));
+function invalidateIngredientCaches() {
+  availIngredientsCache.clear();
+  allIngredientsCache.clear();
 }
 async function getDbStatus() {
   if (!process.env.DATABASE_URL) {
@@ -370,6 +617,10 @@ async function createQuizSession(data) {
   const db = await getDb();
   if (!db) {
     const now = /* @__PURE__ */ new Date();
+    if (_memSessions.size >= 5e3) {
+      const oldest = _memSessions.keys().next().value;
+      if (oldest !== void 0) _memSessions.delete(oldest);
+    }
     _memSessions.set(data.sessionId, { ...data, id: _memSessionCounter++, createdAt: now, updatedAt: now });
     return;
   }
@@ -398,12 +649,12 @@ async function getAllQuizSessions() {
 async function getAllIngredients() {
   const db = await getDb();
   if (!db) return DEFAULT_INGREDIENTS;
-  return await withRetry((d) => d.select().from(ingredients).orderBy(ingredients.category, ingredients.name)) ?? [];
+  return allIngredientsCache.wrap("all", async () => await withRetry((d) => d.select().from(ingredients).orderBy(ingredients.category, ingredients.name)) ?? []);
 }
 async function getAvailableIngredients() {
   const db = await getDb();
   if (!db) return DEFAULT_INGREDIENTS.filter((i) => i.available);
-  return await withRetry((d) => d.select().from(ingredients).where(eq(ingredients.available, true)).orderBy(ingredients.category, ingredients.name)) ?? [];
+  return availIngredientsCache.wrap("all", async () => await withRetry((d) => d.select().from(ingredients).where(eq(ingredients.available, true)).orderBy(ingredients.category, ingredients.name)) ?? []);
 }
 async function updateIngredientAvailability(id, available) {
   const db = await getDb();
@@ -413,6 +664,7 @@ async function updateIngredientAvailability(id, available) {
     return;
   }
   await withRetry((d) => d.update(ingredients).set({ available }).where(eq(ingredients.id, id)));
+  invalidateIngredientCaches();
 }
 async function addCustomIngredient(data) {
   const db = await getDb();
@@ -421,6 +673,7 @@ async function addCustomIngredient(data) {
     return;
   }
   await withRetry((d) => d.insert(ingredients).values({ ...data, isCustom: true }));
+  invalidateIngredientCaches();
 }
 async function deleteIngredient(id) {
   const db = await getDb();
@@ -430,12 +683,15 @@ async function deleteIngredient(id) {
     return;
   }
   await withRetry((d) => d.delete(ingredients).where(and(eq(ingredients.id, id), eq(ingredients.isCustom, true))));
+  invalidateIngredientCaches();
 }
 async function getAdminSetting(key) {
   const db = await getDb();
   if (!db) return _memSettings.get(key) ?? null;
-  const result = await withRetry((d) => d.select().from(adminSettings).where(eq(adminSettings.key, key)).limit(1));
-  return result && result.length > 0 ? result[0].value ?? null : null;
+  return settingsCache.wrap(key, async () => {
+    const result = await withRetry((d) => d.select().from(adminSettings).where(eq(adminSettings.key, key)).limit(1));
+    return result && result.length > 0 ? result[0].value ?? null : null;
+  });
 }
 async function setAdminSetting(key, value) {
   const db = await getDb();
@@ -444,6 +700,7 @@ async function setAdminSetting(key, value) {
     return;
   }
   await withRetry((d) => d.insert(adminSettings).values({ key, value }).onDuplicateKeyUpdate({ set: { value } }));
+  settingsCache.delete(key);
 }
 async function getAllAdminSettings() {
   const db = await getDb();
@@ -453,7 +710,7 @@ async function getAllAdminSettings() {
 async function getAllReviews() {
   const db = await getDb();
   if (!db) return [];
-  return await withRetry((d) => d.select().from(reviews).orderBy(reviews.createdAt)) ?? [];
+  return reviewsCache.wrap("all", async () => await withRetry((d) => d.select().from(reviews).orderBy(reviews.createdAt)) ?? []);
 }
 
 // server/_core/notification.ts
@@ -466,10 +723,28 @@ async function notifyOwner(payload) {
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 var t = initTRPC.context().create({
-  transformer: superjson
+  transformer: superjson,
+  errorFormatter({ shape, error }) {
+    if (error.code === "INTERNAL_SERVER_ERROR") {
+      return { ...shape, message: "Internal server error" };
+    }
+    return shape;
+  }
 });
 var router = t.router;
-var publicProcedure = t.procedure;
+var observability = t.middleware(async ({ path, type, next }) => {
+  const id = requestId();
+  const start = Date.now();
+  const res = await next();
+  const ms = Date.now() - start;
+  if (!res.ok) {
+    logError("trpc", "procedure failed", { id, path, type, ms, code: res.error.code });
+  } else if (ms > 1e3) {
+    logInfo("trpc", "slow procedure", { id, path, type, ms });
+  }
+  return res;
+});
+var publicProcedure = t.procedure.use(observability);
 var requireUser = t.middleware(async (opts) => {
   const { ctx, next } = opts;
   if (!ctx.user) {
@@ -482,8 +757,8 @@ var requireUser = t.middleware(async (opts) => {
     }
   });
 });
-var protectedProcedure = t.procedure.use(requireUser);
-var adminProcedure = t.procedure.use(
+var protectedProcedure = publicProcedure.use(requireUser);
+var adminProcedure = publicProcedure.use(
   t.middleware(async (opts) => {
     const { ctx, next } = opts;
     if (!ctx.user || ctx.user.role !== "admin") {
@@ -531,8 +806,25 @@ var systemRouter = router({
 
 // server/routers.ts
 var ADMIN_SESSION_KEY = "beast_admin_session";
+var WEBHOOK_URL = "https://services.leadconnectorhq.com/hooks/8nDL9BCU3hp9982tGYT1/webhook-trigger/71aa3d40-0ead-46d9-9255-2bbe7caa770d";
 function sanitizeText(input) {
   return input.replace(/<[^>]*>/g, "").trim();
+}
+var generateLimiter = singleton("rl:generate", () => new RateLimiter(40, 1));
+var scanLimiter = singleton("rl:scan", () => new RateLimiter(15, 0.3));
+var loginLimiter = singleton("rl:login", () => new RateLimiter(10, 0.1));
+var orderLimiter = singleton("rl:order", () => new RateLimiter(40, 1));
+function clientIp(ctx) {
+  return ctx.req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ?? ctx.req.socket?.remoteAddress ?? "unknown";
+}
+function enforceRate(limiter, key) {
+  const { ok, retryAfterMs } = limiter.take(key);
+  if (!ok) {
+    throw new TRPCError2({
+      code: "TOO_MANY_REQUESTS",
+      message: `Te veel verzoeken. Probeer over ${Math.ceil(retryAfterMs / 1e3)} seconden opnieuw.`
+    });
+  }
 }
 function isAdminSession(ctx) {
   const cookie = ctx.req.headers.cookie ?? "";
@@ -713,40 +1005,6 @@ Return a JSON object with this exact structure:
   }
   return parsed;
 }
-async function fireWebhook(webhookUrl, sessionId, guestName, answers, recipes, flavorProfile) {
-  const MAX_RETRIES = 3;
-  const payload = JSON.stringify({
-    event: "cocktail_quiz_completed",
-    sessionId,
-    guestName: guestName ?? "Guest",
-    timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-    barName: "The Beast Bar",
-    location: "Indonesia",
-    flavorProfile,
-    recipes,
-    quizAnswers: null,
-    whatsappNumber: "+32492532305"
-  });
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const res = await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: payload
-      });
-      if (res.ok) {
-        console.log(`[Webhook] Fired successfully on attempt ${attempt}`);
-        return true;
-      }
-      console.warn(`[Webhook] Attempt ${attempt} returned HTTP ${res.status}`);
-    } catch (err) {
-      console.error(`[Webhook] Attempt ${attempt} failed:`, err);
-    }
-    if (attempt < MAX_RETRIES) await new Promise((r) => setTimeout(r, 1e3 * attempt));
-  }
-  console.error("[Webhook] All retries exhausted for session:", sessionId);
-  return false;
-}
 var appRouter = router({
   system: systemRouter,
   auth: router({
@@ -759,6 +1017,7 @@ var appRouter = router({
   }),
   admin: router({
     login: publicProcedure.input(z2.object({ username: z2.string(), password: z2.string() })).mutation(({ input, ctx }) => {
+      enforceRate(loginLimiter, clientIp(ctx));
       if (input.username.trim() !== ENV.adminUsername.trim() || input.password !== ENV.adminPassword.trim()) {
         throw new TRPCError2({ code: "UNAUTHORIZED", message: "Invalid credentials" });
       }
@@ -822,6 +1081,7 @@ var appRouter = router({
       // base64 data URI, e.g. "data:image/jpeg;base64,..."
     })).mutation(async ({ input, ctx }) => {
       if (!isAdminSession(ctx)) throw new TRPCError2({ code: "UNAUTHORIZED" });
+      enforceRate(scanLimiter, clientIp(ctx));
       const response = await invokeLLM({
         model: "claude-haiku-4-5-20251001",
         messages: [
@@ -932,7 +1192,8 @@ Rules:
         answer: z2.string()
       })).min(1).max(20),
       allergies: z2.array(z2.string()).optional()
-    })).mutation(async ({ input }) => {
+    })).mutation(async ({ input, ctx }) => {
+      enforceRate(generateLimiter, clientIp(ctx));
       const sessionId = nanoid(16);
       const guestName = input.guestName ? sanitizeText(input.guestName) : null;
       await createQuizSession({
@@ -944,15 +1205,31 @@ Rules:
       });
       const availableIngredients = await getAvailableIngredients();
       const result = await generateCocktailWithClaude(input.answers, availableIngredients, input.allergies);
-      const webhookUrl = "https://services.leadconnectorhq.com/hooks/8nDL9BCU3hp9982tGYT1/webhook-trigger/71aa3d40-0ead-46d9-9255-2bbe7caa770d";
-      let webhookSent = false;
-      webhookSent = await fireWebhook(webhookUrl, sessionId, guestName, input.answers, result.recipes, result.flavorProfile);
       await updateQuizSession(sessionId, {
         answers: input.answers,
         flavorProfile: result.flavorProfile,
         recipes: result.recipes,
         completed: true,
-        webhookSent
+        webhookSent: false
+      });
+      runBackground(async () => {
+        const ok = await deliverWebhook(
+          WEBHOOK_URL,
+          {
+            event: "cocktail_quiz_completed",
+            sessionId,
+            guestName: guestName ?? "Guest",
+            timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+            barName: "The Beast Bar",
+            location: "Indonesia",
+            flavorProfile: result.flavorProfile,
+            recipes: result.recipes,
+            quizAnswers: input.answers,
+            whatsappNumber: "+32492532305"
+          },
+          { label: "quiz-webhook" }
+        );
+        if (ok) await updateQuizSession(sessionId, { webhookSent: true });
       });
       return { flavorProfile: result.flavorProfile, recipes: result.recipes, sessionId };
     }),
@@ -982,6 +1259,7 @@ Rules:
       recipes: z2.array(z2.unknown()).max(10).optional(),
       flavorProfile: z2.unknown().optional()
     })).mutation(async ({ input, ctx }) => {
+      enforceRate(orderLimiter, clientIp(ctx));
       const existing = await getQuizSession(input.sessionId);
       if (existing?.orderSubmitted) {
         return { success: true, alreadySubmitted: true };
@@ -1017,35 +1295,27 @@ Rules:
         consentIp: consentIp ?? void 0,
         consentTimestamp: /* @__PURE__ */ new Date()
       });
-      const webhookUrl = "https://services.leadconnectorhq.com/hooks/8nDL9BCU3hp9982tGYT1/webhook-trigger/71aa3d40-0ead-46d9-9255-2bbe7caa770d";
       const whatsappNumber = await getAdminSetting("whatsapp_number");
       const selectedRecipe = recipes?.[input.selectedRecipeIndex] ?? recipes?.[0];
-      if (webhookUrl) {
-        const payload = {
-          event: "order_submitted",
-          sessionId: input.sessionId,
-          guestName,
-          email: input.email,
-          phone: input.phone,
-          whatsappNumber,
-          selectedRecipe,
-          allRecipes: recipes,
-          flavorProfile,
-          quizAnswers: answers,
-          submittedAt: (/* @__PURE__ */ new Date()).toISOString()
-        };
-        try {
-          const res = await fetch(webhookUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-            signal: AbortSignal.timeout(1e4)
-          });
-          if (!res.ok) console.warn("[Order webhook] non-2xx:", res.status);
-        } catch (err) {
-          console.warn("[Order webhook] failed:", err);
-        }
-      }
+      runBackground(
+        () => deliverWebhook(
+          WEBHOOK_URL,
+          {
+            event: "order_submitted",
+            sessionId: input.sessionId,
+            guestName,
+            email: input.email,
+            phone: input.phone,
+            whatsappNumber,
+            selectedRecipe,
+            allRecipes: recipes,
+            flavorProfile,
+            quizAnswers: answers,
+            submittedAt: (/* @__PURE__ */ new Date()).toISOString()
+          },
+          { label: "order-webhook" }
+        )
+      );
       return { success: true, alreadySubmitted: false };
     })
   }),

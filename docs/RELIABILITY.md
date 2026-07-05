@@ -26,23 +26,46 @@ To go live:
 
 ## What makes it reliable (already in the code)
 
-- **Cached connection pool** (`server/db.ts`): one small `mysql2` pool is
-  created per instance and cached on `globalThis`, so warm invocations reuse
-  connections instead of opening a new one per request. This is what prevents
-  connection exhaustion and "server has gone away" errors under load.
-- **Automatic retry** on transient connection errors (`PROTOCOL_CONNECTION_LOST`,
-  `ECONNRESET`, timeouts, …) — a dropped connection is replaced and the query
-  is retried, so a blip does not surface as an error to the user.
-- **Fluid Compute pool draining**: if running on Vercel Fluid Compute, the pool
-  is registered with `attachDatabasePool` so idle connections drain gracefully
-  before an instance is suspended (best-effort, no-op elsewhere).
-- **Order write is loss-proof** (`server/routers.ts` `submitOrder`): if the
-  stored session row is ever missing, the order is rebuilt from the data the
-  client already holds and upserted, instead of failing with `NOT_FOUND`. It is
-  also idempotent, so a double click never errors.
-- **Optimistic admin toggles** (`client/src/pages/Admin.tsx`): ingredient
-  switches update instantly, roll back on failure and show an error toast, so a
-  slow or failed request can no longer make a button silently "break".
+All reliability primitives live in `server/_core/reliability.ts` and are wired
+through the database layer, tRPC layer and routers.
+
+- **Cached connection pool** (`server/db.ts`): one small `mysql2` pool per
+  instance, cached on `globalThis`, so warm invocations reuse connections
+  instead of opening a new one per request. Prevents connection exhaustion and
+  "server has gone away" errors under load.
+- **Automatic retry with jittered backoff** on transient connection errors and
+  timeouts — a dropped connection is replaced and the query retried, so a blip
+  never surfaces as a user error.
+- **Query timeouts**: every DB query is time-boxed (`DB_QUERY_TIMEOUT_MS`), so a
+  single stuck connection can never hang a request.
+- **Circuit breaker**: after repeated DB failures the breaker opens for a short
+  cooldown — requests fail fast (and cached reads still serve) instead of
+  piling onto a struggling database, then it half-opens to probe recovery.
+- **Read caching** (short-TTL, per instance): reviews, ingredient lists and
+  settings are cached so a spike of concurrent users doesn't become a matching
+  spike of DB queries. Writes invalidate the relevant cache.
+- **Fluid Compute pool draining**: the pool registers with `attachDatabasePool`
+  so idle connections drain before an instance suspends (best-effort).
+- **Per-IP rate limiting** (token bucket) on the expensive endpoints
+  (`generate`, photo `scan`, admin `login`, `submitOrder`) — caps abuse and
+  floods while staying generous enough for a whole venue behind one IP.
+- **Robust, non-blocking webhooks**: order/quiz notifications are delivered in
+  the background (Vercel `waitUntil`) with per-attempt timeouts and retrying
+  backoff, so webhook latency never delays the guest and a flaky endpoint is
+  retried. The order is persisted first, so it reaches the admin regardless.
+- **Resilient LLM calls** (`server/_core/llm.ts`): each Claude call is
+  time-boxed and auto-retried on 429/5xx/network errors with backoff.
+- **Order write is loss-proof** (`submitOrder`): if the stored session row is
+  ever missing, the order is rebuilt from the client's data and upserted instead
+  of failing with `NOT_FOUND`. Idempotent, so a double click never errors.
+- **Structured logging + safe errors** (`server/_core/trpc.ts`): every call is
+  tagged with a request id, timed, and failures/slow calls are logged as JSON;
+  internal error details are never leaked to clients.
+- **Bounded memory**: the dev in-memory fallback, rate-limiter buckets and
+  caches all evict old entries so nothing grows unbounded.
+- **Database indexes** (`drizzle/schema.ts`): on `quiz_sessions(createdAt,
+  orderSubmitted)` and `ingredients(available, category)` for fast reads at
+  scale. Apply them with `pnpm db:push`.
 
 ## Health monitoring — "is it still linked?"
 
