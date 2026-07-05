@@ -75,10 +75,12 @@ function RecipeCard({ recipe, isActive, onClick, rank }: { recipe: Recipe; isAct
   );
 }
 
-function OrderForm({ sessionId, selectedRecipeIndex, guestName, onSuccess }: {
+function OrderForm({ sessionId, selectedRecipeIndex, guestName, recipes, flavorProfile, onSuccess }: {
   sessionId: string;
   selectedRecipeIndex: number;
   guestName?: string | null;
+  recipes?: Recipe[];
+  flavorProfile?: FlavorProfile;
   onSuccess: () => void;
 }) {
   const [email, setEmail] = useState("");
@@ -116,6 +118,11 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, onSuccess }: {
       consentComms: ageConfirmed,
       consentDataSharing: termsAccepted,
       consentFormVersion: CONSENT_FORM_VERSION,
+      // Send the data we already have so the bar still receives the order even
+      // if the server-side session was lost.
+      guestName: guestName ?? undefined,
+      recipes,
+      flavorProfile,
     });
   };
 
@@ -424,6 +431,8 @@ export default function Result() {
               sessionId={params.sessionId ?? ""}
               selectedRecipeIndex={activeRecipe}
               guestName={data.guestName}
+              recipes={recipes}
+              flavorProfile={profile}
               onSuccess={() => setOrderDone(true)}
             />
           )}

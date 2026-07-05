@@ -347,13 +347,33 @@ function IngredientsTab() {
   const [newCat, setNewCat] = useState("spirits");
   const [showAddForm, setShowAddForm] = useState(false);
 
+  const utils = trpc.useUtils();
   const { data: ingredients, refetch } = trpc.admin.getIngredients.useQuery();
-  const updateMutation = trpc.admin.updateIngredient.useMutation({ onSuccess: () => refetch() });
+
+  // Optimistic toggle: flip the switch instantly, roll back + warn on failure,
+  // and reconcile with the server afterwards. Prevents the switch from silently
+  // "sticking" or jumping back when a mutation is slow or fails.
+  const updateMutation = trpc.admin.updateIngredient.useMutation({
+    onMutate: async ({ id, available }) => {
+      await utils.admin.getIngredients.cancel();
+      const prev = utils.admin.getIngredients.getData();
+      utils.admin.getIngredients.setData(undefined, (old) =>
+        old?.map((i) => (i.id === id ? { ...i, available } : i)));
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) utils.admin.getIngredients.setData(undefined, ctx.prev);
+      toast.error("Kon voorraad niet bijwerken. Probeer opnieuw.");
+    },
+    onSettled: () => utils.admin.getIngredients.invalidate(),
+  });
   const addMutation = trpc.admin.addIngredient.useMutation({
     onSuccess: () => { refetch(); setNewName(""); setShowAddForm(false); toast.success("Ingrediënt toegevoegd!"); },
+    onError: () => { toast.error("Kon ingrediënt niet toevoegen. Probeer opnieuw."); },
   });
   const deleteMutation = trpc.admin.deleteIngredient.useMutation({
     onSuccess: () => { refetch(); toast.success("Ingrediënt verwijderd."); },
+    onError: () => { toast.error("Kon ingrediënt niet verwijderen. Probeer opnieuw."); },
   });
 
   const filtered = useMemo(() => (ingredients ?? []).filter((i) => {

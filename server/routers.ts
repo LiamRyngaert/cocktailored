@@ -503,11 +503,12 @@ Rules:
         const sessionId = nanoid(16);
         const guestName = input.guestName ? sanitizeText(input.guestName) : null;
 
-        // Persist session (best-effort — in-memory fallback is fine here too)
+        // Persist session with the real answers up front, so the order and
+        // admin views never end up with an empty quiz even if generation fails.
         await createQuizSession({
           sessionId,
           guestName,
-          answers: [],
+          answers: input.answers,
           completed: false,
           webhookSent: false,
         });
@@ -520,6 +521,7 @@ Rules:
         webhookSent = await fireWebhook(webhookUrl, sessionId, guestName, input.answers, result.recipes, result.flavorProfile);
 
         await updateQuizSession(sessionId, {
+          answers: input.answers,
           flavorProfile: result.flavorProfile,
           recipes: result.recipes,
           completed: true,
@@ -548,18 +550,48 @@ Rules:
         sessionId: z.string().min(8).max(64),
         email: z.string().email().max(320),
         phone: z.string().min(6).max(32).optional(),
-        selectedRecipeIndex: z.number().int().min(0).max(2).default(0),
+        selectedRecipeIndex: z.number().int().min(0).max(9).default(0),
         consentComms: z.boolean(),
         consentDataSharing: z.boolean(),
         consentFormVersion: z.string().max(16),
+        // Fallback copies of the result the client is already holding. Used to
+        // reconstruct the session if its stored row is missing (e.g. evicted),
+        // so an order can never silently fail to reach the bar.
+        guestName: z.string().max(128).optional(),
+        recipes: z.array(z.unknown()).max(10).optional(),
+        flavorProfile: z.unknown().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        const session = await getQuizSession(input.sessionId);
-        if (!session || !session.completed) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Session not found" });
-        }
-        if (session.orderSubmitted) {
+        const existing = await getQuizSession(input.sessionId);
+
+        // Idempotent: a resubmit of an already-placed order is a no-op success.
+        if (existing?.orderSubmitted) {
           return { success: true, alreadySubmitted: true };
+        }
+
+        // Prefer what the server already stored; fall back to the client's copy.
+        const recipes = (existing?.recipes as Array<{ name: string; ingredients: Array<{ name: string; amount: number; unit: string }>; tagline: string; colorHex: string }> | null)
+          ?? (input.recipes as Array<{ name: string; ingredients: Array<{ name: string; amount: number; unit: string }>; tagline: string; colorHex: string }> | undefined)
+          ?? null;
+        const guestName = existing?.guestName ?? (input.guestName ? sanitizeText(input.guestName) : null);
+        const flavorProfile = existing?.flavorProfile ?? input.flavorProfile ?? null;
+        const answers = existing?.answers ?? [];
+
+        // If the stored session vanished, rebuild it from the client's data so
+        // the order still lands in the admin instead of throwing NOT_FOUND.
+        if (!existing) {
+          if (!recipes || recipes.length === 0) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "Session not found" });
+          }
+          await createQuizSession({
+            sessionId: input.sessionId,
+            guestName,
+            answers,
+            flavorProfile,
+            recipes,
+            completed: true,
+            webhookSent: false,
+          });
         }
 
         const consentIp = (ctx.req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim()
@@ -572,6 +604,7 @@ Rules:
           orderPhone: input.phone,
           selectedRecipeIndex: input.selectedRecipeIndex,
           orderSubmitted: true,
+          completed: true,
           consentComms: input.consentComms,
           consentDataSharing: input.consentDataSharing,
           consentFormVersion: input.consentFormVersion,
@@ -582,21 +615,20 @@ Rules:
         // Fire order webhook
         const webhookUrl = "https://services.leadconnectorhq.com/hooks/8nDL9BCU3hp9982tGYT1/webhook-trigger/71aa3d40-0ead-46d9-9255-2bbe7caa770d";
         const whatsappNumber = await getAdminSetting("whatsapp_number");
-        const recipes = session.recipes as Array<{ name: string; ingredients: Array<{ name: string; amount: number; unit: string }>; tagline: string; colorHex: string }> | null;
         const selectedRecipe = recipes?.[input.selectedRecipeIndex] ?? recipes?.[0];
 
         if (webhookUrl) {
           const payload = {
             event: "order_submitted",
             sessionId: input.sessionId,
-            guestName: session.guestName,
+            guestName,
             email: input.email,
             phone: input.phone,
             whatsappNumber,
             selectedRecipe,
             allRecipes: recipes,
-            flavorProfile: session.flavorProfile,
-            quizAnswers: session.answers,
+            flavorProfile,
+            quizAnswers: answers,
             submittedAt: new Date().toISOString(),
           };
           try {
