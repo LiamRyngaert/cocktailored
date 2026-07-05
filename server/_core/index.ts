@@ -36,6 +36,16 @@ async function startServer() {
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);
   registerOAuthRoutes(app);
+  // Health check (mirrors the Vercel entrypoint)
+  app.get("/api/health", async (_req, res) => {
+    try {
+      const { getDbStatus } = await import("../db");
+      const status = await getDbStatus();
+      res.status(status.ok ? 200 : 503).json({ status: status.ok ? "ok" : "degraded", ...status, time: new Date().toISOString() });
+    } catch (err) {
+      res.status(503).json({ status: "error", error: (err as Error).message });
+    }
+  });
   // tRPC API
   app.use(
     "/api/trpc",

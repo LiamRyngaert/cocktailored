@@ -121,10 +121,22 @@ export type ModelsResponse = {
   data: ModelInfo[];
 };
 
+let _client: Anthropic | null = null;
+
 function getClient(): Anthropic {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) throw new Error("ANTHROPIC_API_KEY is not configured");
-  return new Anthropic({ apiKey: key });
+  // Reuse a single client (keep-alive) and let the SDK transparently retry
+  // transient failures (429 rate limits, 5xx, network errors) with backoff, and
+  // time-box each request so a hung upstream can never stall a function.
+  if (!_client) {
+    _client = new Anthropic({
+      apiKey: key,
+      maxRetries: Math.max(0, Number(process.env.LLM_MAX_RETRIES ?? "2") || 2),
+      timeout: Math.max(5_000, Number(process.env.LLM_TIMEOUT_MS ?? "45000") || 45_000),
+    });
+  }
+  return _client;
 }
 
 function convertImageUrl(url: string): ImageBlockParam {

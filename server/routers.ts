@@ -5,6 +5,7 @@ import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { ENV } from "./_core/env";
 import { invokeLLM } from "./_core/llm";
+import { RateLimiter, deliverWebhook, runBackground, singleton } from "./_core/reliability";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import {
@@ -25,8 +26,37 @@ import {
 
 const ADMIN_SESSION_KEY = "beast_admin_session";
 
+// The single LeadConnector webhook the bar's automations listen on.
+const WEBHOOK_URL = "https://services.leadconnectorhq.com/hooks/8nDL9BCU3hp9982tGYT1/webhook-trigger/71aa3d40-0ead-46d9-9255-2bbe7caa770d";
+
 function sanitizeText(input: string): string {
   return input.replace(/<[^>]*>/g, "").trim();
+}
+
+// ── Rate limiting (per client IP, per-instance token buckets) ─────────────────
+// Protects expensive endpoints from abuse and accidental floods without
+// blocking legitimate use. Limits are generous because a whole venue often
+// shares one public IP (NAT) — a group taking the quiz together must never be
+// throttled, while a runaway script still gets capped.
+const generateLimiter = singleton("rl:generate", () => new RateLimiter(40, 1)); // burst 40, ~60/min sustained per IP
+const scanLimiter = singleton("rl:scan", () => new RateLimiter(15, 0.3)); // admin-only, vision calls
+const loginLimiter = singleton("rl:login", () => new RateLimiter(10, 0.1)); // strict brute-force guard
+const orderLimiter = singleton("rl:order", () => new RateLimiter(40, 1));
+
+function clientIp(ctx: { req: { headers: Record<string, string | string[] | undefined>; socket?: { remoteAddress?: string } } }): string {
+  return (ctx.req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim()
+    ?? ctx.req.socket?.remoteAddress
+    ?? "unknown";
+}
+
+function enforceRate(limiter: RateLimiter, key: string): void {
+  const { ok, retryAfterMs } = limiter.take(key);
+  if (!ok) {
+    throw new TRPCError({
+      code: "TOO_MANY_REQUESTS",
+      message: `Te veel verzoeken. Probeer over ${Math.ceil(retryAfterMs / 1000)} seconden opnieuw.`,
+    });
+  }
 }
 
 function isAdminSession(ctx: { req: { headers: Record<string, string | string[] | undefined> } }): boolean {
@@ -235,49 +265,6 @@ Return a JSON object with this exact structure:
   return parsed;
 }
 
-async function fireWebhook(
-  webhookUrl: string,
-  sessionId: string,
-  guestName: string | null,
-  answers: unknown,
-  recipes: unknown,
-  flavorProfile: unknown
-) {
-  const MAX_RETRIES = 3;
-  const payload = JSON.stringify({
-    event: "cocktail_quiz_completed",
-    sessionId,
-    guestName: guestName ?? "Guest",
-    timestamp: new Date().toISOString(),
-    barName: "The Beast Bar",
-    location: "Indonesia",
-    flavorProfile,
-    recipes,
-    quizAnswers: null,
-    whatsappNumber: "+32492532305",
-  });
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const res = await fetch(webhookUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: payload,
-      });
-      if (res.ok) {
-        console.log(`[Webhook] Fired successfully on attempt ${attempt}`);
-        return true;
-      }
-      console.warn(`[Webhook] Attempt ${attempt} returned HTTP ${res.status}`);
-    } catch (err) {
-      console.error(`[Webhook] Attempt ${attempt} failed:`, err);
-    }
-    if (attempt < MAX_RETRIES) await new Promise((r) => setTimeout(r, 1000 * attempt));
-  }
-  console.error("[Webhook] All retries exhausted for session:", sessionId);
-  return false;
-}
-
 export const appRouter = router({
   system: systemRouter,
 
@@ -294,6 +281,7 @@ export const appRouter = router({
     login: publicProcedure
       .input(z.object({ username: z.string(), password: z.string() }))
       .mutation(({ input, ctx }) => {
+        enforceRate(loginLimiter, clientIp(ctx)); // throttle brute-force attempts
         if (input.username.trim() !== ENV.adminUsername.trim() || input.password !== ENV.adminPassword.trim()) {
           throw new TRPCError({ code: "UNAUTHORIZED", message: "Invalid credentials" });
         }
@@ -376,6 +364,7 @@ export const appRouter = router({
       }))
       .mutation(async ({ input, ctx }) => {
         if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
+        enforceRate(scanLimiter, clientIp(ctx));
 
         const response = await invokeLLM({
           model: "claude-haiku-4-5-20251001",
@@ -499,15 +488,17 @@ Rules:
         })).min(1).max(20),
         allergies: z.array(z.string()).optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
+        enforceRate(generateLimiter, clientIp(ctx));
         const sessionId = nanoid(16);
         const guestName = input.guestName ? sanitizeText(input.guestName) : null;
 
-        // Persist session (best-effort — in-memory fallback is fine here too)
+        // Persist session with the real answers up front, so the order and
+        // admin views never end up with an empty quiz even if generation fails.
         await createQuizSession({
           sessionId,
           guestName,
-          answers: [],
+          answers: input.answers,
           completed: false,
           webhookSent: false,
         });
@@ -515,15 +506,36 @@ Rules:
         const availableIngredients = await getAvailableIngredients();
         const result = await generateCocktailWithClaude(input.answers, availableIngredients, input.allergies);
 
-        const webhookUrl = "https://services.leadconnectorhq.com/hooks/8nDL9BCU3hp9982tGYT1/webhook-trigger/71aa3d40-0ead-46d9-9255-2bbe7caa770d";
-        let webhookSent = false;
-        webhookSent = await fireWebhook(webhookUrl, sessionId, guestName, input.answers, result.recipes, result.flavorProfile);
-
+        // Persist the result (source of truth) before responding.
         await updateQuizSession(sessionId, {
+          answers: input.answers,
           flavorProfile: result.flavorProfile,
           recipes: result.recipes,
           completed: true,
-          webhookSent,
+          webhookSent: false,
+        });
+
+        // Notify the bar in the background so webhook latency never delays the
+        // user's result. Delivery retries with backoff; on success we flip the
+        // webhookSent flag.
+        runBackground(async () => {
+          const ok = await deliverWebhook(
+            WEBHOOK_URL,
+            {
+              event: "cocktail_quiz_completed",
+              sessionId,
+              guestName: guestName ?? "Guest",
+              timestamp: new Date().toISOString(),
+              barName: "The Beast Bar",
+              location: "Indonesia",
+              flavorProfile: result.flavorProfile,
+              recipes: result.recipes,
+              quizAnswers: input.answers,
+              whatsappNumber: "+32492532305",
+            },
+            { label: "quiz-webhook" }
+          );
+          if (ok) await updateQuizSession(sessionId, { webhookSent: true });
         });
 
         return { flavorProfile: result.flavorProfile, recipes: result.recipes, sessionId };
@@ -548,18 +560,49 @@ Rules:
         sessionId: z.string().min(8).max(64),
         email: z.string().email().max(320),
         phone: z.string().min(6).max(32).optional(),
-        selectedRecipeIndex: z.number().int().min(0).max(2).default(0),
+        selectedRecipeIndex: z.number().int().min(0).max(9).default(0),
         consentComms: z.boolean(),
         consentDataSharing: z.boolean(),
         consentFormVersion: z.string().max(16),
+        // Fallback copies of the result the client is already holding. Used to
+        // reconstruct the session if its stored row is missing (e.g. evicted),
+        // so an order can never silently fail to reach the bar.
+        guestName: z.string().max(128).optional(),
+        recipes: z.array(z.unknown()).max(10).optional(),
+        flavorProfile: z.unknown().optional(),
       }))
       .mutation(async ({ input, ctx }) => {
-        const session = await getQuizSession(input.sessionId);
-        if (!session || !session.completed) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Session not found" });
-        }
-        if (session.orderSubmitted) {
+        enforceRate(orderLimiter, clientIp(ctx));
+        const existing = await getQuizSession(input.sessionId);
+
+        // Idempotent: a resubmit of an already-placed order is a no-op success.
+        if (existing?.orderSubmitted) {
           return { success: true, alreadySubmitted: true };
+        }
+
+        // Prefer what the server already stored; fall back to the client's copy.
+        const recipes = (existing?.recipes as Array<{ name: string; ingredients: Array<{ name: string; amount: number; unit: string }>; tagline: string; colorHex: string }> | null)
+          ?? (input.recipes as Array<{ name: string; ingredients: Array<{ name: string; amount: number; unit: string }>; tagline: string; colorHex: string }> | undefined)
+          ?? null;
+        const guestName = existing?.guestName ?? (input.guestName ? sanitizeText(input.guestName) : null);
+        const flavorProfile = existing?.flavorProfile ?? input.flavorProfile ?? null;
+        const answers = existing?.answers ?? [];
+
+        // If the stored session vanished, rebuild it from the client's data so
+        // the order still lands in the admin instead of throwing NOT_FOUND.
+        if (!existing) {
+          if (!recipes || recipes.length === 0) {
+            throw new TRPCError({ code: "NOT_FOUND", message: "Session not found" });
+          }
+          await createQuizSession({
+            sessionId: input.sessionId,
+            guestName,
+            answers,
+            flavorProfile,
+            recipes,
+            completed: true,
+            webhookSent: false,
+          });
         }
 
         const consentIp = (ctx.req.headers["x-forwarded-for"] as string | undefined)?.split(",")[0]?.trim()
@@ -572,6 +615,7 @@ Rules:
           orderPhone: input.phone,
           selectedRecipeIndex: input.selectedRecipeIndex,
           orderSubmitted: true,
+          completed: true,
           consentComms: input.consentComms,
           consentDataSharing: input.consentDataSharing,
           consentFormVersion: input.consentFormVersion,
@@ -579,38 +623,30 @@ Rules:
           consentTimestamp: new Date(),
         });
 
-        // Fire order webhook
-        const webhookUrl = "https://services.leadconnectorhq.com/hooks/8nDL9BCU3hp9982tGYT1/webhook-trigger/71aa3d40-0ead-46d9-9255-2bbe7caa770d";
+        // Notify the bar in the background — the order is already persisted
+        // (so it shows in the admin regardless), and delivery retries with
+        // backoff without blocking the guest's confirmation.
         const whatsappNumber = await getAdminSetting("whatsapp_number");
-        const recipes = session.recipes as Array<{ name: string; ingredients: Array<{ name: string; amount: number; unit: string }>; tagline: string; colorHex: string }> | null;
         const selectedRecipe = recipes?.[input.selectedRecipeIndex] ?? recipes?.[0];
-
-        if (webhookUrl) {
-          const payload = {
-            event: "order_submitted",
-            sessionId: input.sessionId,
-            guestName: session.guestName,
-            email: input.email,
-            phone: input.phone,
-            whatsappNumber,
-            selectedRecipe,
-            allRecipes: recipes,
-            flavorProfile: session.flavorProfile,
-            quizAnswers: session.answers,
-            submittedAt: new Date().toISOString(),
-          };
-          try {
-            const res = await fetch(webhookUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
-              signal: AbortSignal.timeout(10000),
-            });
-            if (!res.ok) console.warn("[Order webhook] non-2xx:", res.status);
-          } catch (err) {
-            console.warn("[Order webhook] failed:", err);
-          }
-        }
+        runBackground(() =>
+          deliverWebhook(
+            WEBHOOK_URL,
+            {
+              event: "order_submitted",
+              sessionId: input.sessionId,
+              guestName,
+              email: input.email,
+              phone: input.phone,
+              whatsappNumber,
+              selectedRecipe,
+              allRecipes: recipes,
+              flavorProfile,
+              quizAnswers: answers,
+              submittedAt: new Date().toISOString(),
+            },
+            { label: "order-webhook" }
+          )
+        );
 
         return { success: true, alreadySubmitted: false };
       }),
