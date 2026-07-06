@@ -14,6 +14,7 @@ import {
   users,
 } from "../drizzle/schema";
 import { CircuitBreaker, TTLCache, logError, logInfo, retry, singleton, withTimeout, TimeoutError } from "./_core/reliability";
+import { createSshTunnelStreamFactory, sshTunnelConfigured } from "./_core/sshTunnel";
 
 type Db = MySql2Database<Record<string, never>>;
 
@@ -50,9 +51,18 @@ function resolveSsl(url: string): { rejectUnauthorized: boolean } | undefined {
 }
 
 function createPool(url: string): mysql.Pool {
+  // When SSH_HOST + SSH_PRIVATE_KEY are configured, every connection is
+  // tunnelled over SSH straight to the remote host's own loopback MySQL
+  // instead of a direct TCP connection. This means the DB server never needs
+  // to accept public connections on 3306 — only SSH (port 22) needs to be
+  // reachable, and MySQL's bind-address/user-grant defaults (localhost-only)
+  // keep working untouched, since the connection appears to originate locally
+  // on the far end.
+  const useSshTunnel = sshTunnelConfigured();
   const pool = mysql.createPool({
     uri: url,
-    ssl: resolveSsl(url),
+    ssl: useSshTunnel ? undefined : resolveSsl(url),
+    stream: useSshTunnel ? createSshTunnelStreamFactory() : undefined,
     connectionLimit: POOL_SIZE,
     maxIdle: POOL_SIZE,
     idleTimeout: 10_000, // release idle connections quickly so bursts don't pile up
@@ -62,6 +72,7 @@ function createPool(url: string): mysql.Pool {
     queueLimit: 0,
     connectTimeout: 10_000,
   });
+  if (useSshTunnel) logInfo("db", "connecting via SSH tunnel", { host: process.env.SSH_HOST });
 
   // Best-effort: let Vercel Fluid Compute gracefully drain idle connections
   // before a function is suspended. No-op when not running on Vercel or when

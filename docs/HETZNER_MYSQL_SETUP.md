@@ -2,7 +2,41 @@
 
 If `DATABASE_URL` points to a self-hosted MySQL server on a Hetzner Cloud VPS
 and every query fails with `ETIMEDOUT: connect ETIMEDOUT`, this is a **network
-connectivity issue**, not an application bug. Vercel serverless functions do
+connectivity issue**, not an application bug.
+
+## Option A (recommended): SSH tunnel — no firewall changes needed
+
+The app already supports tunnelling every DB connection over SSH straight to
+the server's own `127.0.0.1:3306`, instead of connecting to MySQL over the
+public internet. From MySQL's point of view the connection looks local, so
+none of the MySQL-side settings below need to change, and **port 3306 never
+needs to be opened publicly** — only SSH (port 22), which is already open on
+any server you can administer.
+
+To enable it, add these in the Vercel dashboard (Settings → Environment
+Variables → Production), never in chat:
+
+- `SSH_HOST` = the Hetzner server's IP or hostname (not secret, safe to note
+  down, but still enter it directly in Vercel)
+- `SSH_USER` = the SSH username (commonly `root`)
+- `SSH_PRIVATE_KEY` — already present in this project; make sure it's the
+  private key that matches a public key installed in that server's
+  `~/.ssh/authorized_keys` for `SSH_USER`
+- `DATABASE_URL` = `mysql://DB_USER:DB_PASSWORD@127.0.0.1:3306/DATABASE` (the
+  host/port here are placeholders — traffic is actually routed through the
+  SSH tunnel — but the user/password/database are read from this string)
+
+That's it — no Hetzner Firewall rule, no `bind-address` change, no MySQL
+`GRANT` change required, since the connection never leaves the server's own
+loopback interface. Redeploy after adding the variables and check
+`/api/health`.
+
+If `SSH_HOST` is not set, the app automatically falls back to a direct TCP
+connection (Option B below).
+
+## Option B: direct connection (needs 3 manual server-side checks)
+
+Use this only if an SSH tunnel isn't possible. Vercel serverless functions do
 not have a static outbound IP address on the Free/Pro plan, so the connection
 must be allowed from any IP and secured with a strong password + TLS instead
 of IP allowlisting.
@@ -10,7 +44,7 @@ of IP allowlisting.
 There are three independent checks — all three must pass simultaneously,
 since any one of them alone is enough to cause the exact same timeout.
 
-## 1. Hetzner Cloud Firewall (check this first — most common cause)
+### 1. Hetzner Cloud Firewall (check this first — most common cause)
 
 Automated provisioning tools commonly open only SSH (port 22) and leave
 every other port closed by default (Hetzner Cloud Firewalls are
@@ -29,7 +63,7 @@ traffic — which is exactly what produces `ETIMEDOUT` rather than
 This has to be done manually in the Hetzner console — it cannot be
 automated from this repo or from Vercel.
 
-## 2. MySQL server config (`bind-address` / `skip-networking`)
+### 2. MySQL server config (`bind-address` / `skip-networking`)
 
 SSH into the server and run the diagnostic script in this repo:
 
@@ -47,7 +81,7 @@ What it checks:
 - `skip-networking` must **not** be present (it disables all TCP/IP
   connections outright).
 
-## 3. MySQL user GRANT host
+### 3. MySQL user GRANT host
 
 Even with the firewall and bind-address correct, MySQL still checks which
 *host* each user is allowed to connect from. If your app's database user was

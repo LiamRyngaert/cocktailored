@@ -455,22 +455,120 @@ var reviews = mysqlTable("reviews", {
   createdAt: timestamp("createdAt").defaultNow().notNull()
 });
 
+// server/_core/sshTunnel.ts
+import { Duplex } from "node:stream";
+import { Client } from "ssh2";
+function sshTunnelConfigured() {
+  return Boolean(process.env.SSH_HOST && process.env.SSH_PRIVATE_KEY);
+}
+var g = globalThis;
+function connectSsh() {
+  return new Promise((resolve, reject) => {
+    const client = new Client();
+    client.on("ready", () => resolve(client)).on("error", (err) => {
+      g.__ctSshClient = null;
+      g.__ctSshReady = null;
+      reject(err);
+    }).on("close", () => {
+      if (g.__ctSshClient === client) {
+        g.__ctSshClient = null;
+        g.__ctSshReady = null;
+      }
+    }).connect({
+      host: process.env.SSH_HOST,
+      port: Number(process.env.SSH_PORT ?? "22"),
+      username: process.env.SSH_USER || "root",
+      privateKey: process.env.SSH_PRIVATE_KEY,
+      passphrase: process.env.SSH_PRIVATE_KEY_PASSPHRASE || void 0,
+      readyTimeout: 1e4,
+      keepaliveInterval: 15e3
+    });
+  });
+}
+function getSshClient() {
+  if (g.__ctSshClient) return Promise.resolve(g.__ctSshClient);
+  if (!g.__ctSshReady) {
+    g.__ctSshReady = connectSsh().then((client) => {
+      g.__ctSshClient = client;
+      return client;
+    });
+  }
+  return g.__ctSshReady;
+}
+function createProxyStream(openRealChannel) {
+  let real = null;
+  let destroyed = false;
+  const pendingWrites = [];
+  const proxy = new Duplex({
+    read() {
+      real?.resume();
+    },
+    write(chunk, _enc, cb) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      if (real) real.write(buf, cb);
+      else pendingWrites.push({ chunk: buf, cb });
+    },
+    final(cb) {
+      real ? real.end(cb) : cb();
+    },
+    destroy(err, cb) {
+      real?.destroy();
+      cb(err);
+    }
+  });
+  openRealChannel().then((channel) => {
+    if (destroyed) return channel.destroy();
+    real = channel;
+    for (const { chunk, cb } of pendingWrites) real.write(chunk, cb);
+    pendingWrites.length = 0;
+    channel.on("data", (d) => {
+      if (!proxy.push(d)) channel.pause();
+    });
+    proxy.on("drain", () => channel.resume());
+    channel.on("end", () => proxy.push(null));
+    channel.on("close", () => proxy.destroy());
+    channel.on("error", (err) => proxy.destroy(err));
+  }).catch((err) => proxy.destroy(err));
+  proxy.on("close", () => {
+    destroyed = true;
+  });
+  return proxy;
+}
+function createSshTunnelStreamFactory() {
+  const remoteHost = process.env.DB_TUNNEL_REMOTE_HOST || "127.0.0.1";
+  const remotePort = Number(process.env.DB_TUNNEL_REMOTE_PORT ?? "3306");
+  return function streamFactory() {
+    return createProxyStream(
+      () => new Promise((resolve, reject) => {
+        getSshClient().then((client) => {
+          client.forwardOut("127.0.0.1", 0, remoteHost, remotePort, (err, stream) => {
+            if (err) reject(err);
+            else resolve(stream);
+          });
+        }).catch(reject);
+      })
+    );
+  };
+}
+
 // server/db.ts
 var POOL_SIZE = Math.max(1, Number(process.env.DB_POOL_SIZE ?? "8") || 8);
-var g = globalThis;
+var g2 = globalThis;
 function resolveSsl(url) {
   const flag = (process.env.DB_SSL ?? "").toLowerCase();
   if (flag === "false" || flag === "0" || flag === "off") return void 0;
-  const managed = /psdb\.cloud|planetscale|aivencloud\.com|\.rds\.amazonaws\.com|azure|scalegrid|sslmode=require|sslaccept|ssl=true/i;
+  const managed = /psdb\.cloud|planetscale|aivencloud\.com|\.rds\.amazonaws\.com|azure|scalegrid/i;
   if (flag === "true" || flag === "1" || flag === "on" || managed.test(url)) {
     return { rejectUnauthorized: true };
   }
   return void 0;
 }
 function createPool(url) {
+  const useSshTunnel = sshTunnelConfigured();
   const pool = mysql.createPool({
     uri: url,
-    ssl: resolveSsl(url),
+    ssl: useSshTunnel ? void 0 : resolveSsl(url),
+    stream: useSshTunnel ? createSshTunnelStreamFactory() : void 0,
     connectionLimit: POOL_SIZE,
     maxIdle: POOL_SIZE,
     idleTimeout: 1e4,
@@ -481,30 +579,31 @@ function createPool(url) {
     queueLimit: 0,
     connectTimeout: 1e4
   });
+  if (useSshTunnel) logInfo("db", "connecting via SSH tunnel", { host: process.env.SSH_HOST });
   import("@vercel/functions").then((vf) => vf.attachDatabasePool?.(pool)).catch(() => {
   });
   pool.on("error", (err) => console.error("[Database] pool error (auto-recovering):", err));
   return pool;
 }
 async function getDb() {
-  if (g.__ctDb) return g.__ctDb;
+  if (g2.__ctDb) return g2.__ctDb;
   const url = process.env.DATABASE_URL;
   if (!url) return null;
   try {
-    if (!g.__ctPool) g.__ctPool = createPool(url);
-    const db = drizzle(g.__ctPool);
+    if (!g2.__ctPool) g2.__ctPool = createPool(url);
+    const db = drizzle(g2.__ctPool);
     await ensureSchemaOnce(db);
-    g.__ctDb = db;
-    return g.__ctDb;
+    g2.__ctDb = db;
+    return g2.__ctDb;
   } catch (error) {
     console.error("[Database] Failed to initialise pool:", error);
-    g.__ctPool = null;
-    g.__ctDb = null;
+    g2.__ctPool = null;
+    g2.__ctDb = null;
     return null;
   }
 }
 function ensureSchemaOnce(db) {
-  return g.__ctSchemaReady ??= ensureSchema(db).catch((err) => {
+  return g2.__ctSchemaReady ??= ensureSchema(db).catch((err) => {
     logError("db", "schema bootstrap failed (continuing)", { error: String(err) });
   });
 }
@@ -564,7 +663,9 @@ async function getDbStatus() {
     await db.execute(sql`SELECT 1`);
     return { mode: "database", ok: true, latencyMs: Date.now() - start };
   } catch (err) {
-    return { mode: "database", ok: false, latencyMs: null, error: err.message };
+    const cause = err.cause;
+    const detail = cause?.code ? `${cause.code}${cause.message ? `: ${cause.message}` : ""}` : err.message;
+    return { mode: "database", ok: false, latencyMs: null, error: detail };
   }
 }
 var _memSessions = /* @__PURE__ */ new Map();
