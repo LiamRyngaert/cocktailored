@@ -1,13 +1,15 @@
 import { and, desc, eq, sql } from "drizzle-orm";
-import { drizzle, type MySql2Database } from "drizzle-orm/mysql2";
-import mysql from "mysql2/promise";
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 import {
   type Ingredient,
+  InsertConsentRecord,
   InsertIngredient,
   InsertQuizSession,
   InsertUser,
   type Review,
   adminSettings,
+  consentRecords,
   ingredients,
   quizSessions,
   reviews,
@@ -16,7 +18,7 @@ import {
 import { CircuitBreaker, TTLCache, logError, logInfo, retry, singleton, withTimeout, TimeoutError } from "./_core/reliability";
 import { createSshTunnelStreamFactory, sshTunnelConfigured } from "./_core/sshTunnel";
 
-type Db = MySql2Database<Record<string, never>>;
+type Db = NodePgDatabase<Record<string, never>>;
 
 // Small pool PER serverless instance. Many instances run concurrently, so the
 // total connection count is (instances x POOL_SIZE) — keep this low so a burst
@@ -27,50 +29,87 @@ const POOL_SIZE = Math.max(1, Number(process.env.DB_POOL_SIZE ?? "8") || 8);
 // single pool instead of opening a fresh connection on every request (the main
 // cause of connection exhaustion and "server has gone away" errors on Vercel).
 const g = globalThis as unknown as {
-  __ctPool?: mysql.Pool | null;
+  __ctPool?: Pool | null;
   __ctDb?: Db | null;
   __ctSchemaReady?: Promise<void>;
 };
 
-// Managed MySQL providers (PlanetScale, Aiven, RDS, Azure…) require TLS. Enable
-// it automatically for those hosts so the connection "just works", while a
-// plain self-hosted MySQL without TLS keeps working. Force with DB_SSL=true|false.
-function resolveSsl(url: string): { rejectUnauthorized: boolean } | undefined {
+// node-postgres natively understands `sslmode` in the connection string (it's
+// genuine libpq/Postgres syntax, unlike MySQL), so no manual URL sniffing is
+// needed here. Force/disable with DB_SSL=true|false; when tunnelling over SSH
+// the connection already terminates at the DB server's own loopback, so TLS
+// is off by default there (override with DB_TUNNEL_SSL=true if pg_hba.conf
+// requires it even for local connections).
+function resolveSsl(useSshTunnel: boolean): boolean | { rejectUnauthorized: boolean } {
   const flag = (process.env.DB_SSL ?? "").toLowerCase();
-  if (flag === "false" || flag === "0" || flag === "off") return undefined;
-  // Only match signals that are meaningful for a MySQL connection string.
-  // NOTE: "sslmode=require" is Postgres query-param syntax, not MySQL — mysql2
-  // ignores it (logs a warning) and it must NOT be used to force a TLS
-  // handshake here, since a MySQL host that isn't actually TLS-configured will
-  // hang on the handshake until the connection times out.
-  const managed = /psdb\.cloud|planetscale|aivencloud\.com|\.rds\.amazonaws\.com|azure|scalegrid/i;
-  if (flag === "true" || flag === "1" || flag === "on" || managed.test(url)) {
-    return { rejectUnauthorized: true };
+  if (flag === "false" || flag === "0" || flag === "off") return false;
+  if (flag === "true" || flag === "1" || flag === "on") return { rejectUnauthorized: false };
+  if (useSshTunnel) {
+    const tunnelFlag = (process.env.DB_TUNNEL_SSL ?? "").toLowerCase();
+    return tunnelFlag === "true" || tunnelFlag === "1" ? { rejectUnauthorized: false } : false;
   }
-  return undefined;
+  // Self-hosted Postgres almost always uses a self-signed certificate —
+  // encrypt the connection without validating against a public CA.
+  return { rejectUnauthorized: false };
 }
 
-function createPool(url: string): mysql.Pool {
+// pg's ConnectionParameters merges an explicit `ssl` option with whatever
+// `sslmode` is parsed FROM the connection string via
+// `Object.assign({}, config, parse(config.connectionString))` — the parsed
+// values are applied last and silently override any explicit `ssl` option.
+// Strip ssl-related query params so our own resolveSsl() decision actually
+// takes effect instead of being clobbered by a stray `?sslmode=require`.
+function stripSslParams(url: string): string {
+  try {
+    const parsed = new URL(url);
+    ["sslmode", "ssl", "sslcert", "sslkey", "sslrootcert", "uselibpqcompat"].forEach((p) =>
+      parsed.searchParams.delete(p)
+    );
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+// Explicit override for a direct (non-tunnelled) connection: replaces
+// whatever host is baked into DATABASE_URL with DB_DIRECT_HOST. Lets the
+// connection target be corrected via a plain (non-secret) env var without
+// ever needing to re-enter the password-bearing DATABASE_URL.
+function applyDirectHostOverride(url: string): string {
+  const directHost = process.env.DB_DIRECT_HOST;
+  if (!directHost) return url;
+  try {
+    const parsed = new URL(url);
+    parsed.hostname = directHost;
+    if (process.env.DB_DIRECT_PORT) parsed.port = process.env.DB_DIRECT_PORT;
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function createPool(url: string): Pool {
   // When SSH_HOST + SSH_PRIVATE_KEY are configured, every connection is
-  // tunnelled over SSH straight to the remote host's own loopback MySQL
+  // tunnelled over SSH straight to the remote host's own loopback Postgres
   // instead of a direct TCP connection. This means the DB server never needs
-  // to accept public connections on 3306 — only SSH (port 22) needs to be
-  // reachable, and MySQL's bind-address/user-grant defaults (localhost-only)
-  // keep working untouched, since the connection appears to originate locally
-  // on the far end.
-  const useSshTunnel = sshTunnelConfigured();
-  const pool = mysql.createPool({
-    uri: url,
-    ssl: useSshTunnel ? undefined : resolveSsl(url),
+  // to accept public connections on 5432 — only SSH (port 22) needs to be
+  // reachable, and pg_hba.conf rules for local connections keep working
+  // untouched, since the connection appears to originate locally on the far
+  // end.
+  //
+  // DB_DIRECT_HOST takes priority and forces a plain direct connection
+  // (skipping the tunnel) when set — used when the DB port is confirmed
+  // reachable directly and/or the SSH tunnel can't be used (e.g. no valid key).
+  const useSshTunnel = !process.env.DB_DIRECT_HOST && sshTunnelConfigured();
+  const pool = new Pool({
+    connectionString: applyDirectHostOverride(stripSslParams(url)),
+    ssl: resolveSsl(useSshTunnel),
     stream: useSshTunnel ? createSshTunnelStreamFactory() : undefined,
-    connectionLimit: POOL_SIZE,
-    maxIdle: POOL_SIZE,
-    idleTimeout: 10_000, // release idle connections quickly so bursts don't pile up
-    enableKeepAlive: true,
-    keepAliveInitialDelay: 10_000,
-    waitForConnections: true,
-    queueLimit: 0,
-    connectTimeout: 10_000,
+    max: POOL_SIZE,
+    idleTimeoutMillis: 10_000, // release idle connections quickly so bursts don't pile up
+    connectionTimeoutMillis: 10_000,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
   });
   if (useSshTunnel) logInfo("db", "connecting via SSH tunnel", { host: process.env.SSH_HOST });
 
@@ -83,8 +122,7 @@ function createPool(url: string): mysql.Pool {
 
   // Never let a background connection error crash the process — the pool
   // transparently reconnects on the next query.
-  (pool as unknown as { on(event: "error", cb: (err: unknown) => void): void })
-    .on("error", (err) => console.error("[Database] pool error (auto-recovering):", err));
+  pool.on("error", (err) => console.error("[Database] pool error (auto-recovering):", err));
 
   return pool;
 }
@@ -112,25 +150,39 @@ export async function getDb(): Promise<Db | null> {
 
 function ensureSchemaOnce(db: Db): Promise<void> {
   return (g.__ctSchemaReady ??= ensureSchema(db).catch((err) => {
-    logError("db", "schema bootstrap failed (continuing)", { error: String(err) });
+    // Unwrap drizzle's generic "Failed query" message to surface the actual
+    // driver/SSH error (auth failure, host unreachable, etc.) in the logs.
+    const e = err as Error & { code?: string; cause?: { code?: string; message?: string; level?: string } };
+    logError("db", "schema bootstrap failed (continuing)", {
+      error: String(err),
+      code: e.code ?? e.cause?.code,
+      causeMessage: e.cause?.message,
+      level: e.cause?.level,
+    });
   }));
 }
 
 // Transient network/connection errors that are safe to retry — a dropped or
-// reset connection is replaced by the pool on the next attempt.
+// reset connection is replaced by the pool on the next attempt. Includes
+// generic OS-level codes plus Postgres SQLSTATE codes for lock contention and
+// server-availability blips (https://www.postgresql.org/docs/current/errcodes-appendix.html).
 const TRANSIENT_CODES = new Set([
-  "PROTOCOL_CONNECTION_LOST",
-  "PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR",
   "ECONNRESET",
   "ECONNREFUSED",
   "ETIMEDOUT",
   "EPIPE",
-  "ER_LOCK_DEADLOCK",
+  "40001", // serialization_failure
+  "40P01", // deadlock_detected
+  "57P03", // cannot_connect_now
+  "08006", // connection_failure
+  "08001", // sqlclient_unable_to_establish_sqlconnection
+  "53300", // too_many_connections
 ]);
 
 function isTransient(err: unknown): boolean {
   if (err instanceof TimeoutError) return true;
-  const code = String((err as { code?: string; errno?: string })?.code ?? (err as { errno?: string })?.errno ?? "");
+  const e = err as { code?: string; cause?: { code?: string } };
+  const code = String(e?.code ?? e?.cause?.code ?? "");
   return TRANSIENT_CODES.has(code);
 }
 
@@ -198,12 +250,14 @@ export async function getDbStatus(): Promise<{
     await db.execute(sql`SELECT 1`);
     return { mode: "database", ok: true, latencyMs: Date.now() - start };
   } catch (err) {
-    // drizzle wraps the real driver error in a generic "Failed query" message;
-    // the useful diagnostic (mysql2 error code, e.g. ETIMEDOUT/ENOTFOUND/
-    // ER_ACCESS_DENIED_ERROR) lives on `cause`. Surface just the code, never
-    // credentials — mysql2 driver error codes never include the password.
-    const cause = (err as Error & { cause?: { code?: string; message?: string } }).cause;
-    const detail = cause?.code ? `${cause.code}${cause.message ? `: ${cause.message}` : ""}` : (err as Error).message;
+    // drizzle sometimes wraps the real driver error in a generic "Failed
+    // query" message; the useful diagnostic (a Node error code like ETIMEDOUT
+    // for a network failure, or a Postgres SQLSTATE like 28P01 for a bad
+    // password) can live directly on the error or on `cause`. Surface just
+    // the code, never credentials — these codes never include the password.
+    const e = err as Error & { code?: string; cause?: { code?: string; message?: string } };
+    const code = e.code ?? e.cause?.code;
+    const detail = code ? `${code}${e.cause?.message ? `: ${e.cause.message}` : ""}` : e.message;
     return { mode: "database", ok: false, latencyMs: null, error: detail };
   }
 }
@@ -246,83 +300,103 @@ const DEFAULT_INGREDIENTS: Array<{ id: number; name: string; category: string; a
 // on an empty database. Uses CREATE TABLE IF NOT EXISTS so it is safe to run on
 // every cold start and never touches existing data — the app works on a freshly
 // provisioned database without a separate `pnpm db:push` step.
+// Matches the real, pre-existing Hetzner Postgres schema (see
+// drizzle/schema.ts for the full explanation). CREATE TABLE IF NOT EXISTS is
+// a safe no-op against the already-populated tables; this only actually
+// creates anything on a genuinely fresh database.
 const SCHEMA_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    openId VARCHAR(64) NOT NULL,
+    id SERIAL PRIMARY KEY,
+    "openId" VARCHAR(64) NOT NULL UNIQUE,
     name TEXT,
     email VARCHAR(320),
-    loginMethod VARCHAR(64),
-    role ENUM('user','admin') NOT NULL DEFAULT 'user',
-    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    lastSignedIn TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY users_openId_unique (openId)
+    "loginMethod" VARCHAR(64),
+    role VARCHAR(16) NOT NULL DEFAULT 'user',
+    "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+    "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+    "lastSignedIn" TIMESTAMP NOT NULL DEFAULT NOW()
   )`,
   `CREATE TABLE IF NOT EXISTS quiz_sessions (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    sessionId VARCHAR(64) NOT NULL,
-    guestName VARCHAR(128),
-    answers JSON NOT NULL,
-    flavorProfile JSON,
-    recipes JSON,
-    selectedRecipeIndex INT DEFAULT 0,
-    orderEmail VARCHAR(320),
-    orderPhone VARCHAR(64),
-    orderSubmitted BOOLEAN NOT NULL DEFAULT FALSE,
-    webhookSent BOOLEAN NOT NULL DEFAULT FALSE,
-    completed BOOLEAN NOT NULL DEFAULT FALSE,
-    consentComms BOOLEAN DEFAULT FALSE,
-    consentDataSharing BOOLEAN DEFAULT FALSE,
-    consentFormVersion VARCHAR(16),
-    consentIp VARCHAR(64),
-    consentTimestamp TIMESTAMP NULL,
-    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY quiz_sessions_sessionId_unique (sessionId),
-    KEY quiz_sessions_created_at_idx (createdAt),
-    KEY quiz_sessions_order_submitted_idx (orderSubmitted)
+    id SERIAL PRIMARY KEY,
+    session_id VARCHAR(64) NOT NULL UNIQUE,
+    name VARCHAR(128),
+    email VARCHAR(320),
+    ip_address VARCHAR(64),
+    device_type VARCHAR(32),
+    country VARCHAR(64),
+    answers JSONB NOT NULL,
+    flavor_profile JSONB,
+    generated_recipes JSONB,
+    selected_recipe_index INTEGER DEFAULT 0,
+    allergies TEXT,
+    is_custom BOOLEAN DEFAULT FALSE,
+    order_email VARCHAR(320),
+    order_phone VARCHAR(64),
+    order_submitted BOOLEAN NOT NULL DEFAULT FALSE,
+    webhook_sent BOOLEAN NOT NULL DEFAULT FALSE,
+    webhook_sent_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS quiz_sessions_created_at_idx ON quiz_sessions (created_at)`,
+  `CREATE INDEX IF NOT EXISTS quiz_sessions_order_submitted_idx ON quiz_sessions (order_submitted)`,
+  `CREATE TABLE IF NOT EXISTS consent_records (
+    id SERIAL PRIMARY KEY,
+    session_id VARCHAR(64) NOT NULL,
+    email VARCHAR(320),
+    consent_marketing BOOLEAN DEFAULT FALSE,
+    consent_third_party BOOLEAN DEFAULT FALSE,
+    consent_timestamp TIMESTAMP,
+    consent_ip VARCHAR(64),
+    privacy_policy_version VARCHAR(16),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
   )`,
   `CREATE TABLE IF NOT EXISTS ingredients (
-    id INT AUTO_INCREMENT PRIMARY KEY,
+    id SERIAL PRIMARY KEY,
     name VARCHAR(128) NOT NULL,
     category VARCHAR(64) NOT NULL,
     available BOOLEAN NOT NULL DEFAULT TRUE,
-    isCustom BOOLEAN NOT NULL DEFAULT FALSE,
-    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    KEY ingredients_available_idx (available),
-    KEY ingredients_category_idx (category)
+    is_custom BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
   )`,
+  `CREATE INDEX IF NOT EXISTS ingredients_available_idx ON ingredients (available)`,
+  `CREATE INDEX IF NOT EXISTS ingredients_category_idx ON ingredients (category)`,
   `CREATE TABLE IF NOT EXISTS admin_settings (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    \`key\` VARCHAR(64) NOT NULL,
+    key VARCHAR(64) PRIMARY KEY,
     value TEXT,
-    updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY admin_settings_key_unique (\`key\`)
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
   )`,
   `CREATE TABLE IF NOT EXISTS reviews (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(64) NOT NULL,
-    \`text\` TEXT NOT NULL,
-    rating INT NOT NULL DEFAULT 5,
-    color VARCHAR(32) NOT NULL DEFAULT '#ff6b35',
-    emoji VARCHAR(8) NOT NULL DEFAULT '',
-    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id SERIAL PRIMARY KEY,
+    reviewer_name VARCHAR(64) NOT NULL,
+    review_text TEXT NOT NULL,
+    rating INTEGER NOT NULL DEFAULT 5,
+    avatar_url TEXT,
+    is_female BOOLEAN,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
   )`,
 ];
 
 async function ensureSchema(db: Db): Promise<void> {
   for (const stmt of SCHEMA_STATEMENTS) {
-    await withTimeout(db.execute(sql.raw(stmt)), 15_000, "schema bootstrap");
+    try {
+      await withTimeout(db.execute(sql.raw(stmt)), 15_000, "schema bootstrap");
+    } catch (err) {
+      // Don't let one statement's failure (e.g. lacking ALTER/INDEX privilege
+      // on a table owned by a different DB role) block the rest — each
+      // statement is independent and the app already tolerates a table
+      // existing without every index in place.
+      logError("db", "schema statement failed (continuing)", { statement: stmt.slice(0, 60), error: String(err) });
+    }
   }
   // Seed the default ingredient list on an empty table so the quiz has stock to
   // work with out of the box (the admin can then toggle/add its own).
-  const countRows = (await withTimeout(
-    db.execute(sql`SELECT COUNT(*) AS c FROM ingredients`),
+  const result = await withTimeout(
+    db.execute<{ c: string | number }>(sql`SELECT COUNT(*) AS c FROM ingredients`),
     10_000,
     "ingredient count"
-  )) as unknown as [Array<{ c: number | string }>];
-  const count = Number(countRows?.[0]?.[0]?.c ?? 0);
+  );
+  const count = Number(result.rows?.[0]?.c ?? 0);
   if (count === 0) {
     await db.insert(ingredients).values(
       DEFAULT_INGREDIENTS.map((i) => ({ name: i.name, category: i.category, available: i.available, isCustom: false }))
@@ -359,7 +433,10 @@ export async function upsertUser(user: InsertUser): Promise<void> {
   }
   if (!values.lastSignedIn) values.lastSignedIn = new Date();
   if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = new Date();
-  await withRetry((d) => d.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet }));
+  // Postgres has no MySQL-style "ON UPDATE CURRENT_TIMESTAMP" column — bump
+  // updatedAt explicitly on every upsert.
+  updateSet.updatedAt = new Date();
+  await withRetry((d) => d.insert(users).values(values).onConflictDoUpdate({ target: users.openId, set: updateSet }));
 }
 
 export async function getUserByOpenId(openId: string) {
@@ -411,6 +488,15 @@ export async function getAllQuizSessions() {
   const db = await getDb();
   if (!db) return Array.from(_memSessions.values()).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(0, 200);
   return (await withRetry((d) => d.select().from(quizSessions).orderBy(desc(quizSessions.createdAt)).limit(200))) ?? [];
+}
+
+// ---- GDPR Consent Records ----
+// A separate, append-only audit trail (not columns on quiz_sessions) so
+// consent is independently auditable and immutable once recorded.
+export async function createConsentRecord(data: InsertConsentRecord) {
+  const db = await getDb();
+  if (!db) return; // no in-memory fallback needed — non-critical for the demo path
+  await withRetry((d) => d.insert(consentRecords).values(data));
 }
 
 // ---- Ingredients ----
@@ -475,7 +561,7 @@ export async function getAdminSetting(key: string): Promise<string | null> {
 export async function setAdminSetting(key: string, value: string) {
   const db = await getDb();
   if (!db) { _memSettings.set(key, value); return; }
-  await withRetry((d) => d.insert(adminSettings).values({ key, value }).onDuplicateKeyUpdate({ set: { value } }));
+  await withRetry((d) => d.insert(adminSettings).values({ key, value }).onConflictDoUpdate({ target: adminSettings.key, set: { value, updatedAt: new Date() } }));
   settingsCache.delete(key);
 }
 

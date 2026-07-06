@@ -370,89 +370,100 @@ import { z } from "zod";
 
 // server/db.ts
 import { and, desc, eq, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/mysql2";
-import mysql from "mysql2/promise";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 
 // drizzle/schema.ts
 import {
   boolean,
   index,
-  int,
-  json,
-  mysqlEnum,
-  mysqlTable,
+  integer,
+  jsonb,
+  pgTable,
+  serial,
   text,
   timestamp,
   varchar
-} from "drizzle-orm/mysql-core";
-var users = mysqlTable("users", {
-  id: int("id").autoincrement().primaryKey(),
+} from "drizzle-orm/pg-core";
+var users = pgTable("users", {
+  id: serial("id").primaryKey(),
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
   loginMethod: varchar("loginMethod", { length: 64 }),
-  role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  role: varchar("role", { length: 16 }).default("user").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull()
 });
-var quizSessions = mysqlTable("quiz_sessions", {
-  id: int("id").autoincrement().primaryKey(),
-  sessionId: varchar("sessionId", { length: 64 }).notNull().unique(),
-  guestName: varchar("guestName", { length: 128 }),
-  answers: json("answers").notNull(),
+var quizSessions = pgTable("quiz_sessions", {
+  id: serial("id").primaryKey(),
+  sessionId: varchar("session_id", { length: 64 }).notNull().unique(),
+  guestName: varchar("name", { length: 128 }),
+  guestEmail: varchar("email", { length: 320 }),
+  ipAddress: varchar("ip_address", { length: 64 }),
+  deviceType: varchar("device_type", { length: 32 }),
+  country: varchar("country", { length: 64 }),
+  answers: jsonb("answers").notNull(),
   // Array of {questionId, question, answer}
-  flavorProfile: json("flavorProfile"),
+  flavorProfile: jsonb("flavor_profile"),
   // Derived flavor profile object
-  recipes: json("recipes"),
+  recipes: jsonb("generated_recipes"),
   // Array of 3 generated cocktail recipes
-  selectedRecipeIndex: int("selectedRecipeIndex").default(0),
+  selectedRecipeIndex: integer("selected_recipe_index").default(0),
+  allergies: text("allergies"),
+  isCustom: boolean("is_custom").default(false),
   // Order inquiry fields
-  orderEmail: varchar("orderEmail", { length: 320 }),
-  orderPhone: varchar("orderPhone", { length: 64 }),
-  orderSubmitted: boolean("orderSubmitted").default(false).notNull(),
-  webhookSent: boolean("webhookSent").default(false).notNull(),
-  completed: boolean("completed").default(false).notNull(),
-  // GDPR consent audit trail — stored at time of order submission
-  consentComms: boolean("consentComms").default(false),
-  consentDataSharing: boolean("consentDataSharing").default(false),
-  consentFormVersion: varchar("consentFormVersion", { length: 16 }),
-  consentIp: varchar("consentIp", { length: 64 }),
-  consentTimestamp: timestamp("consentTimestamp"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
+  orderEmail: varchar("order_email", { length: 320 }),
+  orderPhone: varchar("order_phone", { length: 64 }),
+  orderSubmitted: boolean("order_submitted").default(false).notNull(),
+  webhookSent: boolean("webhook_sent").default(false).notNull(),
+  webhookSentAt: timestamp("webhook_sent_at"),
+  // Real schema tracks completion via a nullable timestamp, not a boolean.
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull()
 }, (t2) => ({
   // Admin list orders by newest first and filters to submitted orders.
   createdAtIdx: index("quiz_sessions_created_at_idx").on(t2.createdAt),
   orderSubmittedIdx: index("quiz_sessions_order_submitted_idx").on(t2.orderSubmitted)
 }));
-var ingredients = mysqlTable("ingredients", {
-  id: int("id").autoincrement().primaryKey(),
+var consentRecords = pgTable("consent_records", {
+  id: serial("id").primaryKey(),
+  sessionId: varchar("session_id", { length: 64 }).notNull(),
+  email: varchar("email", { length: 320 }),
+  consentMarketing: boolean("consent_marketing").default(false),
+  consentThirdParty: boolean("consent_third_party").default(false),
+  consentTimestamp: timestamp("consent_timestamp"),
+  consentIp: varchar("consent_ip", { length: 64 }),
+  privacyPolicyVersion: varchar("privacy_policy_version", { length: 16 }),
+  createdAt: timestamp("created_at").defaultNow().notNull()
+});
+var ingredients = pgTable("ingredients", {
+  id: serial("id").primaryKey(),
   name: varchar("name", { length: 128 }).notNull(),
   category: varchar("category", { length: 64 }).notNull(),
   // spirits, mixers, liqueurs, garnishes, syrups, juices, bitters
   available: boolean("available").default(true).notNull(),
-  isCustom: boolean("isCustom").default(false).notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+  isCustom: boolean("is_custom").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull()
 }, (t2) => ({
   // Reads filter on availability and order by category.
   availableIdx: index("ingredients_available_idx").on(t2.available),
   categoryIdx: index("ingredients_category_idx").on(t2.category)
 }));
-var adminSettings = mysqlTable("admin_settings", {
-  id: int("id").autoincrement().primaryKey(),
-  key: varchar("key", { length: 64 }).notNull().unique(),
+var adminSettings = pgTable("admin_settings", {
+  key: varchar("key", { length: 64 }).primaryKey(),
   value: text("value"),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull()
+  updatedAt: timestamp("updated_at").defaultNow().notNull()
 });
-var reviews = mysqlTable("reviews", {
-  id: int("id").autoincrement().primaryKey(),
-  name: varchar("name", { length: 64 }).notNull(),
-  text: text("text").notNull(),
-  rating: int("rating").notNull().default(5),
-  color: varchar("color", { length: 32 }).notNull().default("#ff6b35"),
-  emoji: varchar("emoji", { length: 8 }).notNull().default(""),
-  createdAt: timestamp("createdAt").defaultNow().notNull()
+var reviews = pgTable("reviews", {
+  id: serial("id").primaryKey(),
+  name: varchar("reviewer_name", { length: 64 }).notNull(),
+  text: text("review_text").notNull(),
+  rating: integer("rating").notNull().default(5),
+  avatarUrl: text("avatar_url"),
+  isFemale: boolean("is_female"),
+  createdAt: timestamp("created_at").defaultNow().notNull()
 });
 
 // server/_core/sshTunnel.ts
@@ -461,11 +472,33 @@ import { Client } from "ssh2";
 function sshTunnelConfigured() {
   return Boolean(process.env.SSH_HOST && process.env.SSH_PRIVATE_KEY);
 }
+function normalizePrivateKey(raw) {
+  let key = raw.trim();
+  if (!key.includes("\n") && key.includes("\\n")) {
+    key = key.replace(/\\n/g, "\n");
+  }
+  return key.replace(/\r\n/g, "\n");
+}
 var g = globalThis;
+function describeKeyFormat(key) {
+  const match = key.match(/-----BEGIN ([A-Z0-9 ]+)-----/);
+  return match ? match[1] : "no PEM/OpenSSH header found";
+}
 function connectSsh() {
   return new Promise((resolve, reject) => {
     const client = new Client();
-    client.on("ready", () => resolve(client)).on("error", (err) => {
+    const privateKey = normalizePrivateKey(process.env.SSH_PRIVATE_KEY);
+    client.on("ready", () => {
+      logInfo("ssh", "SSH connection established", { host: process.env.SSH_HOST });
+      resolve(client);
+    }).on("error", (err) => {
+      logError("ssh", "SSH connection failed", {
+        host: process.env.SSH_HOST,
+        user: process.env.SSH_USER || "root",
+        message: err.message,
+        level: err.level,
+        keyFormat: describeKeyFormat(privateKey)
+      });
       g.__ctSshClient = null;
       g.__ctSshReady = null;
       reject(err);
@@ -474,15 +507,27 @@ function connectSsh() {
         g.__ctSshClient = null;
         g.__ctSshReady = null;
       }
-    }).connect({
-      host: process.env.SSH_HOST,
-      port: Number(process.env.SSH_PORT ?? "22"),
-      username: process.env.SSH_USER || "root",
-      privateKey: process.env.SSH_PRIVATE_KEY,
-      passphrase: process.env.SSH_PRIVATE_KEY_PASSPHRASE || void 0,
-      readyTimeout: 1e4,
-      keepaliveInterval: 15e3
     });
+    try {
+      client.connect({
+        host: process.env.SSH_HOST,
+        port: Number(process.env.SSH_PORT ?? "22"),
+        username: process.env.SSH_USER || "root",
+        privateKey,
+        passphrase: process.env.SSH_PRIVATE_KEY_PASSPHRASE || void 0,
+        readyTimeout: 1e4,
+        keepaliveInterval: 15e3
+      });
+    } catch (err) {
+      logError("ssh", "SSH connect() threw synchronously", {
+        host: process.env.SSH_HOST,
+        message: err.message,
+        keyFormat: describeKeyFormat(privateKey),
+        keyLength: privateKey.length,
+        keyLineCount: privateKey.split("\n").length
+      });
+      reject(err);
+    }
   });
 }
 function getSshClient() {
@@ -495,89 +540,117 @@ function getSshClient() {
   }
   return g.__ctSshReady;
 }
-function createProxyStream(openRealChannel) {
-  let real = null;
-  let destroyed = false;
-  const pendingWrites = [];
-  const proxy = new Duplex({
-    read() {
-      real?.resume();
-    },
-    write(chunk, _enc, cb) {
-      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      if (real) real.write(buf, cb);
-      else pendingWrites.push({ chunk: buf, cb });
-    },
-    final(cb) {
-      real ? real.end(cb) : cb();
-    },
-    destroy(err, cb) {
-      real?.destroy();
-      cb(err);
-    }
-  });
-  openRealChannel().then((channel) => {
-    if (destroyed) return channel.destroy();
-    real = channel;
-    for (const { chunk, cb } of pendingWrites) real.write(chunk, cb);
-    pendingWrites.length = 0;
-    channel.on("data", (d) => {
-      if (!proxy.push(d)) channel.pause();
+var SshTunnelSocket = class extends Duplex {
+  constructor(remoteHost, remotePort) {
+    super();
+    this.remoteHost = remoteHost;
+    this.remotePort = remotePort;
+  }
+  real = null;
+  pending = [];
+  setNoDelay() {
+    return this;
+  }
+  connect() {
+    getSshClient().then(
+      (client) => new Promise((resolve, reject) => {
+        client.forwardOut("127.0.0.1", 0, this.remoteHost, this.remotePort, (err, channel) => {
+          if (err) reject(err);
+          else resolve(channel);
+        });
+      })
+    ).then((channel) => {
+      this.real = channel;
+      for (const { chunk, cb } of this.pending) channel.write(chunk, cb);
+      this.pending.length = 0;
+      channel.on("data", (d) => {
+        if (!this.push(d)) channel.pause();
+      });
+      this.on("drain", () => channel.resume());
+      channel.on("end", () => this.push(null));
+      channel.on("close", () => this.emit("close"));
+      channel.on("error", (err) => this.emit("error", err));
+      this.emit("connect");
+    }).catch((err) => {
+      logError("ssh", "failed to open forwarded channel to remote DB", {
+        remoteHost: this.remoteHost,
+        remotePort: this.remotePort,
+        message: err.message
+      });
+      this.emit("error", err);
     });
-    proxy.on("drain", () => channel.resume());
-    channel.on("end", () => proxy.push(null));
-    channel.on("close", () => proxy.destroy());
-    channel.on("error", (err) => proxy.destroy(err));
-  }).catch((err) => proxy.destroy(err));
-  proxy.on("close", () => {
-    destroyed = true;
-  });
-  return proxy;
-}
+  }
+  _read() {
+    this.real?.resume();
+  }
+  _write(chunk, _enc, cb) {
+    if (this.real) this.real.write(chunk, cb);
+    else this.pending.push({ chunk, cb });
+  }
+  _final(cb) {
+    this.real ? this.real.end(cb) : cb();
+  }
+  _destroy(err, cb) {
+    this.real?.destroy();
+    cb(err);
+  }
+};
 function createSshTunnelStreamFactory() {
   const remoteHost = process.env.DB_TUNNEL_REMOTE_HOST || "127.0.0.1";
-  const remotePort = Number(process.env.DB_TUNNEL_REMOTE_PORT ?? "3306");
+  const remotePort = Number(process.env.DB_TUNNEL_REMOTE_PORT ?? "5432");
   return function streamFactory() {
-    return createProxyStream(
-      () => new Promise((resolve, reject) => {
-        getSshClient().then((client) => {
-          client.forwardOut("127.0.0.1", 0, remoteHost, remotePort, (err, stream) => {
-            if (err) reject(err);
-            else resolve(stream);
-          });
-        }).catch(reject);
-      })
-    );
+    return new SshTunnelSocket(remoteHost, remotePort);
   };
 }
 
 // server/db.ts
 var POOL_SIZE = Math.max(1, Number(process.env.DB_POOL_SIZE ?? "8") || 8);
 var g2 = globalThis;
-function resolveSsl(url) {
+function resolveSsl(useSshTunnel) {
   const flag = (process.env.DB_SSL ?? "").toLowerCase();
-  if (flag === "false" || flag === "0" || flag === "off") return void 0;
-  const managed = /psdb\.cloud|planetscale|aivencloud\.com|\.rds\.amazonaws\.com|azure|scalegrid/i;
-  if (flag === "true" || flag === "1" || flag === "on" || managed.test(url)) {
-    return { rejectUnauthorized: true };
+  if (flag === "false" || flag === "0" || flag === "off") return false;
+  if (flag === "true" || flag === "1" || flag === "on") return { rejectUnauthorized: false };
+  if (useSshTunnel) {
+    const tunnelFlag = (process.env.DB_TUNNEL_SSL ?? "").toLowerCase();
+    return tunnelFlag === "true" || tunnelFlag === "1" ? { rejectUnauthorized: false } : false;
   }
-  return void 0;
+  return { rejectUnauthorized: false };
+}
+function stripSslParams(url) {
+  try {
+    const parsed = new URL(url);
+    ["sslmode", "ssl", "sslcert", "sslkey", "sslrootcert", "uselibpqcompat"].forEach(
+      (p) => parsed.searchParams.delete(p)
+    );
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+function applyDirectHostOverride(url) {
+  const directHost = process.env.DB_DIRECT_HOST;
+  if (!directHost) return url;
+  try {
+    const parsed = new URL(url);
+    parsed.hostname = directHost;
+    if (process.env.DB_DIRECT_PORT) parsed.port = process.env.DB_DIRECT_PORT;
+    return parsed.toString();
+  } catch {
+    return url;
+  }
 }
 function createPool(url) {
-  const useSshTunnel = sshTunnelConfigured();
-  const pool = mysql.createPool({
-    uri: url,
-    ssl: useSshTunnel ? void 0 : resolveSsl(url),
+  const useSshTunnel = !process.env.DB_DIRECT_HOST && sshTunnelConfigured();
+  const pool = new Pool({
+    connectionString: applyDirectHostOverride(stripSslParams(url)),
+    ssl: resolveSsl(useSshTunnel),
     stream: useSshTunnel ? createSshTunnelStreamFactory() : void 0,
-    connectionLimit: POOL_SIZE,
-    maxIdle: POOL_SIZE,
-    idleTimeout: 1e4,
+    max: POOL_SIZE,
+    idleTimeoutMillis: 1e4,
     // release idle connections quickly so bursts don't pile up
-    enableKeepAlive: true,
-    keepAliveInitialDelay: 1e4,
-    waitForConnections: true,
-    queueLimit: 0,
-    connectTimeout: 1e4
+    connectionTimeoutMillis: 1e4,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 1e4
   });
   if (useSshTunnel) logInfo("db", "connecting via SSH tunnel", { host: process.env.SSH_HOST });
   import("@vercel/functions").then((vf) => vf.attachDatabasePool?.(pool)).catch(() => {
@@ -604,21 +677,37 @@ async function getDb() {
 }
 function ensureSchemaOnce(db) {
   return g2.__ctSchemaReady ??= ensureSchema(db).catch((err) => {
-    logError("db", "schema bootstrap failed (continuing)", { error: String(err) });
+    const e = err;
+    logError("db", "schema bootstrap failed (continuing)", {
+      error: String(err),
+      code: e.code ?? e.cause?.code,
+      causeMessage: e.cause?.message,
+      level: e.cause?.level
+    });
   });
 }
 var TRANSIENT_CODES = /* @__PURE__ */ new Set([
-  "PROTOCOL_CONNECTION_LOST",
-  "PROTOCOL_ENQUEUE_AFTER_FATAL_ERROR",
   "ECONNRESET",
   "ECONNREFUSED",
   "ETIMEDOUT",
   "EPIPE",
-  "ER_LOCK_DEADLOCK"
+  "40001",
+  // serialization_failure
+  "40P01",
+  // deadlock_detected
+  "57P03",
+  // cannot_connect_now
+  "08006",
+  // connection_failure
+  "08001",
+  // sqlclient_unable_to_establish_sqlconnection
+  "53300"
+  // too_many_connections
 ]);
 function isTransient(err) {
   if (err instanceof TimeoutError) return true;
-  const code = String(err?.code ?? err?.errno ?? "");
+  const e = err;
+  const code = String(e?.code ?? e?.cause?.code ?? "");
   return TRANSIENT_CODES.has(code);
 }
 var dbBreaker = singleton("dbBreaker", () => new CircuitBreaker(5, 1e4));
@@ -663,8 +752,9 @@ async function getDbStatus() {
     await db.execute(sql`SELECT 1`);
     return { mode: "database", ok: true, latencyMs: Date.now() - start };
   } catch (err) {
-    const cause = err.cause;
-    const detail = cause?.code ? `${cause.code}${cause.message ? `: ${cause.message}` : ""}` : err.message;
+    const e = err;
+    const code = e.code ?? e.cause?.code;
+    const detail = code ? `${code}${e.cause?.message ? `: ${e.cause.message}` : ""}` : e.message;
     return { mode: "database", ok: false, latencyMs: null, error: detail };
   }
 }
@@ -700,78 +790,90 @@ var DEFAULT_INGREDIENTS = [
 ];
 var SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS users (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    openId VARCHAR(64) NOT NULL,
+    id SERIAL PRIMARY KEY,
+    "openId" VARCHAR(64) NOT NULL UNIQUE,
     name TEXT,
     email VARCHAR(320),
-    loginMethod VARCHAR(64),
-    role ENUM('user','admin') NOT NULL DEFAULT 'user',
-    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    lastSignedIn TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY users_openId_unique (openId)
+    "loginMethod" VARCHAR(64),
+    role VARCHAR(16) NOT NULL DEFAULT 'user',
+    "createdAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+    "updatedAt" TIMESTAMP NOT NULL DEFAULT NOW(),
+    "lastSignedIn" TIMESTAMP NOT NULL DEFAULT NOW()
   )`,
   `CREATE TABLE IF NOT EXISTS quiz_sessions (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    sessionId VARCHAR(64) NOT NULL,
-    guestName VARCHAR(128),
-    answers JSON NOT NULL,
-    flavorProfile JSON,
-    recipes JSON,
-    selectedRecipeIndex INT DEFAULT 0,
-    orderEmail VARCHAR(320),
-    orderPhone VARCHAR(64),
-    orderSubmitted BOOLEAN NOT NULL DEFAULT FALSE,
-    webhookSent BOOLEAN NOT NULL DEFAULT FALSE,
-    completed BOOLEAN NOT NULL DEFAULT FALSE,
-    consentComms BOOLEAN DEFAULT FALSE,
-    consentDataSharing BOOLEAN DEFAULT FALSE,
-    consentFormVersion VARCHAR(16),
-    consentIp VARCHAR(64),
-    consentTimestamp TIMESTAMP NULL,
-    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY quiz_sessions_sessionId_unique (sessionId),
-    KEY quiz_sessions_created_at_idx (createdAt),
-    KEY quiz_sessions_order_submitted_idx (orderSubmitted)
+    id SERIAL PRIMARY KEY,
+    session_id VARCHAR(64) NOT NULL UNIQUE,
+    name VARCHAR(128),
+    email VARCHAR(320),
+    ip_address VARCHAR(64),
+    device_type VARCHAR(32),
+    country VARCHAR(64),
+    answers JSONB NOT NULL,
+    flavor_profile JSONB,
+    generated_recipes JSONB,
+    selected_recipe_index INTEGER DEFAULT 0,
+    allergies TEXT,
+    is_custom BOOLEAN DEFAULT FALSE,
+    order_email VARCHAR(320),
+    order_phone VARCHAR(64),
+    order_submitted BOOLEAN NOT NULL DEFAULT FALSE,
+    webhook_sent BOOLEAN NOT NULL DEFAULT FALSE,
+    webhook_sent_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+  )`,
+  `CREATE INDEX IF NOT EXISTS quiz_sessions_created_at_idx ON quiz_sessions (created_at)`,
+  `CREATE INDEX IF NOT EXISTS quiz_sessions_order_submitted_idx ON quiz_sessions (order_submitted)`,
+  `CREATE TABLE IF NOT EXISTS consent_records (
+    id SERIAL PRIMARY KEY,
+    session_id VARCHAR(64) NOT NULL,
+    email VARCHAR(320),
+    consent_marketing BOOLEAN DEFAULT FALSE,
+    consent_third_party BOOLEAN DEFAULT FALSE,
+    consent_timestamp TIMESTAMP,
+    consent_ip VARCHAR(64),
+    privacy_policy_version VARCHAR(16),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
   )`,
   `CREATE TABLE IF NOT EXISTS ingredients (
-    id INT AUTO_INCREMENT PRIMARY KEY,
+    id SERIAL PRIMARY KEY,
     name VARCHAR(128) NOT NULL,
     category VARCHAR(64) NOT NULL,
     available BOOLEAN NOT NULL DEFAULT TRUE,
-    isCustom BOOLEAN NOT NULL DEFAULT FALSE,
-    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    KEY ingredients_available_idx (available),
-    KEY ingredients_category_idx (category)
+    is_custom BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
   )`,
+  `CREATE INDEX IF NOT EXISTS ingredients_available_idx ON ingredients (available)`,
+  `CREATE INDEX IF NOT EXISTS ingredients_category_idx ON ingredients (category)`,
   `CREATE TABLE IF NOT EXISTS admin_settings (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    \`key\` VARCHAR(64) NOT NULL,
+    key VARCHAR(64) PRIMARY KEY,
     value TEXT,
-    updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY admin_settings_key_unique (\`key\`)
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
   )`,
   `CREATE TABLE IF NOT EXISTS reviews (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    name VARCHAR(64) NOT NULL,
-    \`text\` TEXT NOT NULL,
-    rating INT NOT NULL DEFAULT 5,
-    color VARCHAR(32) NOT NULL DEFAULT '#ff6b35',
-    emoji VARCHAR(8) NOT NULL DEFAULT '',
-    createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id SERIAL PRIMARY KEY,
+    reviewer_name VARCHAR(64) NOT NULL,
+    review_text TEXT NOT NULL,
+    rating INTEGER NOT NULL DEFAULT 5,
+    avatar_url TEXT,
+    is_female BOOLEAN,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
   )`
 ];
 async function ensureSchema(db) {
   for (const stmt of SCHEMA_STATEMENTS) {
-    await withTimeout(db.execute(sql.raw(stmt)), 15e3, "schema bootstrap");
+    try {
+      await withTimeout(db.execute(sql.raw(stmt)), 15e3, "schema bootstrap");
+    } catch (err) {
+      logError("db", "schema statement failed (continuing)", { statement: stmt.slice(0, 60), error: String(err) });
+    }
   }
-  const countRows = await withTimeout(
+  const result = await withTimeout(
     db.execute(sql`SELECT COUNT(*) AS c FROM ingredients`),
     1e4,
     "ingredient count"
   );
-  const count = Number(countRows?.[0]?.[0]?.c ?? 0);
+  const count = Number(result.rows?.[0]?.c ?? 0);
   if (count === 0) {
     await db.insert(ingredients).values(
       DEFAULT_INGREDIENTS.map((i) => ({ name: i.name, category: i.category, available: i.available, isCustom: false }))
@@ -804,7 +906,8 @@ async function upsertUser(user) {
   }
   if (!values.lastSignedIn) values.lastSignedIn = /* @__PURE__ */ new Date();
   if (Object.keys(updateSet).length === 0) updateSet.lastSignedIn = /* @__PURE__ */ new Date();
-  await withRetry((d) => d.insert(users).values(values).onDuplicateKeyUpdate({ set: updateSet }));
+  updateSet.updatedAt = /* @__PURE__ */ new Date();
+  await withRetry((d) => d.insert(users).values(values).onConflictDoUpdate({ target: users.openId, set: updateSet }));
 }
 async function getUserByOpenId(openId) {
   const db = await getDb();
@@ -844,6 +947,11 @@ async function getAllQuizSessions() {
   const db = await getDb();
   if (!db) return Array.from(_memSessions.values()).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(0, 200);
   return await withRetry((d) => d.select().from(quizSessions).orderBy(desc(quizSessions.createdAt)).limit(200)) ?? [];
+}
+async function createConsentRecord(data) {
+  const db = await getDb();
+  if (!db) return;
+  await withRetry((d) => d.insert(consentRecords).values(data));
 }
 async function getAllIngredients() {
   const db = await getDb();
@@ -898,7 +1006,7 @@ async function setAdminSetting(key, value) {
     _memSettings.set(key, value);
     return;
   }
-  await withRetry((d) => d.insert(adminSettings).values({ key, value }).onDuplicateKeyUpdate({ set: { value } }));
+  await withRetry((d) => d.insert(adminSettings).values({ key, value }).onConflictDoUpdate({ target: adminSettings.key, set: { value, updatedAt: /* @__PURE__ */ new Date() } }));
   settingsCache.delete(key);
 }
 async function getAllAdminSettings() {
@@ -1360,7 +1468,6 @@ Rules:
         sessionId,
         guestName: input.guestName ? sanitizeText(input.guestName) : null,
         answers: [],
-        completed: false,
         webhookSent: false
       });
       return { sessionId };
@@ -1399,7 +1506,6 @@ Rules:
         sessionId,
         guestName,
         answers: input.answers,
-        completed: false,
         webhookSent: false
       });
       const availableIngredients = await getAvailableIngredients();
@@ -1408,7 +1514,7 @@ Rules:
         answers: input.answers,
         flavorProfile: result.flavorProfile,
         recipes: result.recipes,
-        completed: true,
+        completedAt: /* @__PURE__ */ new Date(),
         webhookSent: false
       });
       runBackground(async () => {
@@ -1434,7 +1540,7 @@ Rules:
     }),
     getResult: publicProcedure.input(z2.object({ sessionId: z2.string() })).query(async ({ input }) => {
       const session = await getQuizSession(input.sessionId);
-      if (!session || !session.completed) return null;
+      if (!session || !session.completedAt) return null;
       return {
         flavorProfile: session.flavorProfile,
         recipes: session.recipes,
@@ -1477,7 +1583,7 @@ Rules:
           answers,
           flavorProfile,
           recipes,
-          completed: true,
+          completedAt: /* @__PURE__ */ new Date(),
           webhookSent: false
         });
       }
@@ -1487,10 +1593,14 @@ Rules:
         orderPhone: input.phone,
         selectedRecipeIndex: input.selectedRecipeIndex,
         orderSubmitted: true,
-        completed: true,
-        consentComms: input.consentComms,
-        consentDataSharing: input.consentDataSharing,
-        consentFormVersion: input.consentFormVersion,
+        completedAt: /* @__PURE__ */ new Date()
+      });
+      await createConsentRecord({
+        sessionId: input.sessionId,
+        email: input.email,
+        consentMarketing: input.consentComms,
+        consentThirdParty: input.consentDataSharing,
+        privacyPolicyVersion: input.consentFormVersion,
         consentIp: consentIp ?? void 0,
         consentTimestamp: /* @__PURE__ */ new Date()
       });

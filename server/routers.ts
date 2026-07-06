@@ -10,6 +10,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import {
   addCustomIngredient,
+  createConsentRecord,
   createQuizSession,
   deleteIngredient,
   getAdminSetting,
@@ -450,7 +451,6 @@ Rules:
           sessionId,
           guestName: input.guestName ? sanitizeText(input.guestName) : null,
           answers: [],
-          completed: false,
           webhookSent: false,
         });
         return { sessionId };
@@ -499,7 +499,6 @@ Rules:
           sessionId,
           guestName,
           answers: input.answers,
-          completed: false,
           webhookSent: false,
         });
 
@@ -511,7 +510,7 @@ Rules:
           answers: input.answers,
           flavorProfile: result.flavorProfile,
           recipes: result.recipes,
-          completed: true,
+          completedAt: new Date(),
           webhookSent: false,
         });
 
@@ -545,7 +544,7 @@ Rules:
       .input(z.object({ sessionId: z.string() }))
       .query(async ({ input }) => {
         const session = await getQuizSession(input.sessionId);
-        if (!session || !session.completed) return null;
+        if (!session || !session.completedAt) return null;
         return {
           flavorProfile: session.flavorProfile,
           recipes: session.recipes,
@@ -600,7 +599,7 @@ Rules:
             answers,
             flavorProfile,
             recipes,
-            completed: true,
+            completedAt: new Date(),
             webhookSent: false,
           });
         }
@@ -609,16 +608,23 @@ Rules:
           ?? ctx.req.socket?.remoteAddress
           ?? null;
 
-        // Persist order details + GDPR consent audit trail
+        // Persist order details
         await updateQuizSession(input.sessionId, {
           orderEmail: input.email,
           orderPhone: input.phone,
           selectedRecipeIndex: input.selectedRecipeIndex,
           orderSubmitted: true,
-          completed: true,
-          consentComms: input.consentComms,
-          consentDataSharing: input.consentDataSharing,
-          consentFormVersion: input.consentFormVersion,
+          completedAt: new Date(),
+        });
+
+        // GDPR consent audit trail — a separate, immutable record rather than
+        // columns on quiz_sessions.
+        await createConsentRecord({
+          sessionId: input.sessionId,
+          email: input.email,
+          consentMarketing: input.consentComms,
+          consentThirdParty: input.consentDataSharing,
+          privacyPolicyVersion: input.consentFormVersion,
           consentIp: consentIp ?? undefined,
           consentTimestamp: new Date(),
         });
