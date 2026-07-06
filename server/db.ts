@@ -37,7 +37,12 @@ const g = globalThis as unknown as {
 function resolveSsl(url: string): { rejectUnauthorized: boolean } | undefined {
   const flag = (process.env.DB_SSL ?? "").toLowerCase();
   if (flag === "false" || flag === "0" || flag === "off") return undefined;
-  const managed = /psdb\.cloud|planetscale|aivencloud\.com|\.rds\.amazonaws\.com|azure|scalegrid|sslmode=require|sslaccept|ssl=true/i;
+  // Only match signals that are meaningful for a MySQL connection string.
+  // NOTE: "sslmode=require" is Postgres query-param syntax, not MySQL — mysql2
+  // ignores it (logs a warning) and it must NOT be used to force a TLS
+  // handshake here, since a MySQL host that isn't actually TLS-configured will
+  // hang on the handshake until the connection times out.
+  const managed = /psdb\.cloud|planetscale|aivencloud\.com|\.rds\.amazonaws\.com|azure|scalegrid/i;
   if (flag === "true" || flag === "1" || flag === "on" || managed.test(url)) {
     return { rejectUnauthorized: true };
   }
@@ -182,7 +187,13 @@ export async function getDbStatus(): Promise<{
     await db.execute(sql`SELECT 1`);
     return { mode: "database", ok: true, latencyMs: Date.now() - start };
   } catch (err) {
-    return { mode: "database", ok: false, latencyMs: null, error: (err as Error).message };
+    // drizzle wraps the real driver error in a generic "Failed query" message;
+    // the useful diagnostic (mysql2 error code, e.g. ETIMEDOUT/ENOTFOUND/
+    // ER_ACCESS_DENIED_ERROR) lives on `cause`. Surface just the code, never
+    // credentials — mysql2 driver error codes never include the password.
+    const cause = (err as Error & { cause?: { code?: string; message?: string } }).cause;
+    const detail = cause?.code ? `${cause.code}${cause.message ? `: ${cause.message}` : ""}` : (err as Error).message;
+    return { mode: "database", ok: false, latencyMs: null, error: detail };
   }
 }
 
