@@ -48,50 +48,119 @@ function drawRadialBlob(ctx: CanvasRenderingContext2D, x: number, y: number, r: 
   ctx.drawImage(tmp, x - r, y - r);
 }
 
-function applyGradientToQR(qrImg: HTMLImageElement, gradIdx: number, size: number): HTMLCanvasElement {
-  const tmpC = document.createElement("canvas");
-  tmpC.width = size; tmpC.height = size;
-  const tmpCtx = tmpC.getContext("2d")!;
-  tmpCtx.drawImage(qrImg, 0, 0, size, size);
-  const d = tmpCtx.getImageData(0, 0, size, size).data;
-
-  const gradC = document.createElement("canvas");
-  gradC.width = size; gradC.height = size;
-  const gc = gradC.getContext("2d")!;
+function qrGradientFor(ctx: CanvasRenderingContext2D, gradIdx: number, size: number): CanvasGradient {
   let g: CanvasGradient;
   if (gradIdx === 0) {
-    g = gc.createLinearGradient(0, 0, size, size);
+    g = ctx.createLinearGradient(0, 0, size, size);
     g.addColorStop(0, "#ff9a00"); g.addColorStop(0.45, "#ff3cac"); g.addColorStop(1, "#9b59b6");
   } else if (gradIdx === 1) {
-    g = gc.createLinearGradient(0, 0, size, size);
+    g = ctx.createLinearGradient(0, 0, size, size);
     g.addColorStop(0, "#ff9a00"); g.addColorStop(0.2, "#ff6b35"); g.addColorStop(0.45, "#ff3cac");
     g.addColorStop(0.72, "#c800ff"); g.addColorStop(1, "#7b2fff");
   } else if (gradIdx === 2) {
-    g = gc.createConicGradient(0, size / 2, size / 2);
+    g = ctx.createConicGradient(0, size / 2, size / 2);
     g.addColorStop(0, "#ff9a00"); g.addColorStop(0.25, "#ff3cac"); g.addColorStop(0.5, "#9b59b6");
     g.addColorStop(0.75, "#3b82f6"); g.addColorStop(1, "#ff9a00");
   } else {
-    g = gc.createRadialGradient(size * 0.3, size * 0.3, 0, size / 2, size / 2, size * 0.75);
+    g = ctx.createRadialGradient(size * 0.3, size * 0.3, 0, size / 2, size / 2, size * 0.75);
     g.addColorStop(0, "#ff9a00"); g.addColorStop(0.4, "#ff3cac"); g.addColorStop(1, "#9b59b6");
   }
-  gc.fillStyle = g; gc.fillRect(0, 0, size, size);
-  const gd = gc.getImageData(0, 0, size, size).data;
+  return g;
+}
+
+// Renders a QR code by drawing every dark module as its own small rounded
+// square (instead of a single crisp raster image), so the individual QR
+// "pixels" visibly have soft corners rather than sharp right angles.
+function renderRoundedQR(text: string, size: number, gradIdx: number): HTMLCanvasElement {
+  const qrData = QRCodeLib.create(text, { errorCorrectionLevel: "H" });
+  const modules = qrData.modules;
+  const count = modules.size;
+  const margin = 2; // quiet-zone modules
+  const cell = size / (count + margin * 2);
 
   const out = document.createElement("canvas");
   out.width = size; out.height = size;
-  const oc = out.getContext("2d")!;
-  const od = oc.createImageData(size, size);
-  const o = od.data;
-  const bg = 13;
-  for (let i = 0; i < d.length; i += 4) {
-    const t = 1 - Math.min((d[i] + d[i + 1] + d[i + 2]) / 3 / 200, 1);
-    o[i] = Math.round(gd[i] * t + bg * (1 - t));
-    o[i + 1] = Math.round(gd[i + 1] * t + bg * (1 - t));
-    o[i + 2] = Math.round(gd[i + 2] * t + bg * (1 - t));
-    o[i + 3] = 255;
+  const ctx = out.getContext("2d")!;
+  ctx.fillStyle = "#0d0d0d";
+  ctx.fillRect(0, 0, size, size);
+
+  ctx.fillStyle = qrGradientFor(ctx, gradIdx, size);
+  // Modules stay touching (like a normal QR code) — only the corners get a
+  // very subtle round-over, not isolated dots with visible gaps.
+  const gap = cell * 0.02;
+  const r = Math.max(1, cell * 0.16);
+  for (let row = 0; row < count; row++) {
+    for (let col = 0; col < count; col++) {
+      if (!modules.get(row, col)) continue;
+      const x = (col + margin) * cell + gap / 2;
+      const y = (row + margin) * cell + gap / 2;
+      const w = cell - gap;
+      const h = cell - gap;
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+      ctx.lineTo(x + r, y + h);
+      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+      ctx.fill();
+    }
   }
-  oc.putImageData(od, 0, 0);
   return out;
+}
+
+// Draws the real Cocktailored cocktail-glass logo image in the center of a QR
+// canvas, on top of a small, barely-rounded background square so the QR
+// scanner still reads the surrounding modules cleanly.
+function drawCenterLogo(canvas: HTMLCanvasElement, logoImg: HTMLImageElement): void {
+  const ctx = canvas.getContext("2d")!;
+  const size = canvas.width;
+  const logoSize = size * 0.18;
+  const pad = logoSize * 0.16;
+  const boxSize = logoSize + pad * 2;
+  const bx = (size - boxSize) / 2;
+  const by = (size - boxSize) / 2;
+
+  const roundedRect = (x: number, y: number, w: number, h: number, r: number) => {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  };
+
+  ctx.save();
+  ctx.fillStyle = "#0d0d0d";
+  roundedRect(bx, by, boxSize, boxSize, boxSize * 0.06);
+  ctx.fill();
+
+  ctx.save();
+  roundedRect(bx, by, boxSize, boxSize, boxSize * 0.06);
+  ctx.clip();
+  const lx = (size - logoSize) / 2;
+  const ly = (size - logoSize) / 2;
+  ctx.drawImage(logoImg, lx, ly, logoSize, logoSize);
+  ctx.restore();
+  ctx.restore();
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
 }
 
 function buildCardCanvas(qrCanvas: HTMLCanvasElement): HTMLCanvasElement {
@@ -112,21 +181,33 @@ function buildCardCanvas(qrCanvas: HTMLCanvasElement): HTMLCanvasElement {
   drawRadialBlob(ctx, SIZE, SIZE, 300, "rgba(60,20,100,0.65)");
   drawRadialBlob(ctx, 0, SIZE, 220, "rgba(10,80,80,0.5)");
   ctx.textBaseline = "middle";
-  ctx.font = "800 76px system-ui, sans-serif";
-  const SP = 2;
-  const cW = measureTextSpaced(ctx, "Cocktail", SP);
-  const oW = measureTextSpaced(ctx, "ored", SP);
-  const sx = (SIZE - cW - oW) / 2;
+  // Slogan sits ABOVE the QR code, bigger and split across two lines.
+  const SSP = 4;
+  ctx.font = "700 36px system-ui, sans-serif";
+  const slLine1 = "ORDER YOUR";
+  const sW1 = measureTextSpaced(ctx, slLine1, SSP);
+  const sG = ctx.createLinearGradient((SIZE - sW1) / 2, 0, (SIZE - sW1) / 2 + sW1, 0);
+  sG.addColorStop(0, "#ff9a00"); sG.addColorStop(0.5, "#ff3cac"); sG.addColorStop(1, "#9b59b6");
+  ctx.fillStyle = sG;
+  drawTextSpaced(ctx, slLine1, (SIZE - sW1) / 2, 64, SSP);
+  // Line 2: "PERSONALIZED" white (matches the "Cocktail" brand styling) and
+  // slightly bigger, "COCKTAIL" keeps the gradient.
+  ctx.font = "700 39px system-ui, sans-serif";
+  const word1 = "PERSONALIZED ";
+  const word2 = "COCKTAIL";
+  const w1W = measureTextSpaced(ctx, word1, SSP);
+  const w2W = measureTextSpaced(ctx, word2, SSP);
+  const line2StartX = (SIZE - (w1W + w2W)) / 2;
   ctx.fillStyle = "#ffffff";
-  drawTextSpaced(ctx, "Cocktail", sx, 96, SP);
-  const gT = ctx.createLinearGradient(sx + cW, 0, sx + cW + oW, 0);
-  gT.addColorStop(0, "#ff3cac"); gT.addColorStop(1, "#9b59b6");
-  ctx.fillStyle = gT;
-  drawTextSpaced(ctx, "ored", sx + cW, 96, SP);
+  drawTextSpaced(ctx, word1, line2StartX, 106, SSP);
+  const sG2 = ctx.createLinearGradient(line2StartX + w1W, 0, line2StartX + w1W + w2W, 0);
+  sG2.addColorStop(0, "#ff9a00"); sG2.addColorStop(0.5, "#ff3cac"); sG2.addColorStop(1, "#9b59b6");
+  ctx.fillStyle = sG2;
+  drawTextSpaced(ctx, word2, line2StartX + w1W, 106, SSP);
   const qrBox = document.createElement("canvas");
   qrBox.width = QR; qrBox.height = QR;
   const qc = qrBox.getContext("2d")!;
-  const ir = 24, pw = QR * 0.02;
+  const ir = 6, pw = QR * 0.02;
   const roundedPath = (c: CanvasRenderingContext2D, w: number, h: number, rr: number) => {
     c.beginPath();
     c.moveTo(rr, 0); c.lineTo(w - rr, 0); c.quadraticCurveTo(w, 0, w, rr);
@@ -141,14 +222,18 @@ function buildCardCanvas(qrCanvas: HTMLCanvasElement): HTMLCanvasElement {
   qc.drawImage(qrCanvas, pw, pw, QR - pw * 2, QR - pw * 2);
   qc.restore();
   ctx.drawImage(qrBox, (SIZE - QR) / 2, (SIZE - QR) / 2 + 22);
-  ctx.font = "700 24px system-ui, sans-serif";
-  const sl = "ORDER YOUR PERSONALIZED COCKTAIL";
-  const SSP = 6;
-  const sW = measureTextSpaced(ctx, sl, SSP);
-  const sG = ctx.createLinearGradient((SIZE - sW) / 2, 0, (SIZE - sW) / 2 + sW, 0);
-  sG.addColorStop(0, "#ff9a00"); sG.addColorStop(0.5, "#ff3cac"); sG.addColorStop(1, "#9b59b6");
-  ctx.fillStyle = sG;
-  drawTextSpaced(ctx, sl, (SIZE - sW) / 2, SIZE - 55, SSP);
+  // Brand name now sits BELOW the QR code.
+  ctx.font = "800 76px system-ui, sans-serif";
+  const SP = 2;
+  const cW = measureTextSpaced(ctx, "Cocktail", SP);
+  const oW = measureTextSpaced(ctx, "ored", SP);
+  const sx = (SIZE - cW - oW) / 2;
+  ctx.fillStyle = "#ffffff";
+  drawTextSpaced(ctx, "Cocktail", sx, SIZE - 52, SP);
+  const gT = ctx.createLinearGradient(sx + cW, 0, sx + cW + oW, 0);
+  gT.addColorStop(0, "#ff3cac"); gT.addColorStop(1, "#9b59b6");
+  ctx.fillStyle = gT;
+  drawTextSpaced(ctx, "ored", sx + cW, SIZE - 52, SP);
   ctx.restore();
   return off;
 }
@@ -779,19 +864,13 @@ function QRCodesTab() {
     (async () => {
       try {
         const size = 400;
-        const rawDataUrl: string = await QRCodeLib.toDataURL(QR_URL, {
-          width: size, margin: 1, errorCorrectionLevel: "H",
-          color: { dark: "#000000", light: "#ffffff" },
-        });
-        const qrImg = new Image();
-        qrImg.onload = () => {
-          if (cancelled) return;
-          const styled = applyGradientToQR(qrImg, 0, size);
-          const card = buildCardCanvas(styled);
-          setCardDataUrl(card.toDataURL("image/png"));
-          setLoading(false);
-        };
-        qrImg.src = rawDataUrl;
+        const styled = renderRoundedQR(QR_URL, size, 0);
+        const logoImg = await loadImage("/brand/cocktail-logo.jpeg");
+        if (cancelled) return;
+        drawCenterLogo(styled, logoImg);
+        const card = buildCardCanvas(styled);
+        setCardDataUrl(card.toDataURL("image/png"));
+        setLoading(false);
       } catch {
         if (!cancelled) setLoading(false);
       }

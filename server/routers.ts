@@ -5,7 +5,7 @@ import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { ENV } from "./_core/env";
 import { invokeLLM } from "./_core/llm";
-import { RateLimiter, deliverWebhook, runBackground, singleton } from "./_core/reliability";
+import { RateLimiter, deliverWebhook, logInfo, runBackground, singleton } from "./_core/reliability";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import {
@@ -220,6 +220,15 @@ Return a JSON object with this exact structure:
       },
     },
   });
+
+  if (response.usage) {
+    logInfo("llm", "cocktail generation token usage", {
+      model: response.model,
+      promptTokens: response.usage.prompt_tokens,
+      completionTokens: response.usage.completion_tokens,
+      totalTokens: response.usage.total_tokens,
+    });
+  }
 
   const content = response.choices[0]?.message?.content;
   if (!content) throw new Error("No response from Claude");
