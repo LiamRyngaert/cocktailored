@@ -68,15 +68,20 @@ function qrGradientFor(ctx: CanvasRenderingContext2D, gradIdx: number, size: num
   return g;
 }
 
-// Renders a QR code by drawing every dark module as its own small rounded
-// square (instead of a single crisp raster image), so the individual QR
-// "pixels" visibly have soft corners rather than sharp right angles.
+// Renders a QR code where connected runs of dark modules merge into solid,
+// seamless blocks (like a normal QR code) — only the corners that are
+// actually exposed (neither adjacent edge-neighbor is also dark) get rounded
+// off. A corner shared with a dark neighbor stays a hard 90° angle, so runs
+// of modules read as one continuous rounded-pill/blob shape instead of a
+// grid of separate dots with visible gaps.
 function renderRoundedQR(text: string, size: number, gradIdx: number): HTMLCanvasElement {
   const qrData = QRCodeLib.create(text, { errorCorrectionLevel: "H" });
   const modules = qrData.modules;
   const count = modules.size;
   const margin = 2; // quiet-zone modules
   const cell = size / (count + margin * 2);
+  const isDark = (row: number, col: number): boolean =>
+    row >= 0 && row < count && col >= 0 && col < count && !!modules.get(row, col);
 
   const out = document.createElement("canvas");
   out.width = size; out.height = size;
@@ -85,27 +90,34 @@ function renderRoundedQR(text: string, size: number, gradIdx: number): HTMLCanva
   ctx.fillRect(0, 0, size, size);
 
   ctx.fillStyle = qrGradientFor(ctx, gradIdx, size);
-  // Modules stay touching (like a normal QR code) — only the corners get a
-  // very subtle round-over, not isolated dots with visible gaps.
-  const gap = cell * 0.02;
-  const r = Math.max(1, cell * 0.16);
+  // No gap — modules that touch a dark neighbor connect with zero seam.
+  const r = Math.max(1, cell * 0.42);
   for (let row = 0; row < count; row++) {
     for (let col = 0; col < count; col++) {
-      if (!modules.get(row, col)) continue;
-      const x = (col + margin) * cell + gap / 2;
-      const y = (row + margin) * cell + gap / 2;
-      const w = cell - gap;
-      const h = cell - gap;
+      if (!isDark(row, col)) continue;
+      const top = isDark(row - 1, col);
+      const bottom = isDark(row + 1, col);
+      const left = isDark(row, col - 1);
+      const right = isDark(row, col + 1);
+      const rTL = top || left ? 0 : r;
+      const rTR = top || right ? 0 : r;
+      const rBR = bottom || right ? 0 : r;
+      const rBL = bottom || left ? 0 : r;
+
+      const x = (col + margin) * cell;
+      const y = (row + margin) * cell;
+      const w = cell;
+      const h = cell;
       ctx.beginPath();
-      ctx.moveTo(x + r, y);
-      ctx.lineTo(x + w - r, y);
-      ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-      ctx.lineTo(x + w, y + h - r);
-      ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-      ctx.lineTo(x + r, y + h);
-      ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-      ctx.lineTo(x, y + r);
-      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.moveTo(x + rTL, y);
+      ctx.lineTo(x + w - rTR, y);
+      if (rTR) ctx.quadraticCurveTo(x + w, y, x + w, y + rTR);
+      ctx.lineTo(x + w, y + h - rBR);
+      if (rBR) ctx.quadraticCurveTo(x + w, y + h, x + w - rBR, y + h);
+      ctx.lineTo(x + rBL, y + h);
+      if (rBL) ctx.quadraticCurveTo(x, y + h, x, y + h - rBL);
+      ctx.lineTo(x, y + rTL);
+      if (rTL) ctx.quadraticCurveTo(x, y, x + rTL, y);
       ctx.closePath();
       ctx.fill();
     }
