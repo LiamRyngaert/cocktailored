@@ -606,7 +606,15 @@ function OrdersTab() {
         </button>
 
         <div className="mb-5">
-          <h3 className="font-display text-xl font-bold text-white">{selectedSession.guestName ?? "Anoniem"}</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-display text-xl font-bold text-white">{selectedSession.guestName ?? "Anoniem"}</h3>
+            {selectedSession.tableNumber && (
+              <span className="text-xs font-bold rounded-full px-2.5 py-1"
+                style={{ background: "rgba(255,107,53,0.15)", color: "#ff6b35", border: "1px solid rgba(255,107,53,0.3)" }}>
+                Tafel {selectedSession.tableNumber}
+              </span>
+            )}
+          </div>
           <p className="text-white/40 text-xs mt-0.5">
             {new Date(selectedSession.createdAt).toLocaleDateString("nl-NL")} om{" "}
             {new Date(selectedSession.createdAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" })}
@@ -711,7 +719,15 @@ function OrdersTab() {
                     <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: recipe.colorHex }} />
                   )}
                   <div className="min-w-0">
-                    <div className="text-white font-semibold text-sm">{session.guestName ?? "Anoniem"}</div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="text-white font-semibold text-sm">{session.guestName ?? "Anoniem"}</div>
+                      {session.tableNumber && (
+                        <span className="text-[10px] font-bold rounded-full px-1.5 py-0.5 flex-shrink-0"
+                          style={{ background: "rgba(255,107,53,0.15)", color: "#ff6b35", border: "1px solid rgba(255,107,53,0.3)" }}>
+                          T{session.tableNumber}
+                        </span>
+                      )}
+                    </div>
                     <div className="text-white/40 text-xs mt-0.5 truncate">
                       {new Date(session.createdAt).toLocaleDateString("nl-NL")} om{" "}
                       {new Date(session.createdAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" })}
@@ -1005,9 +1021,19 @@ function SettingsTab() {
     }
   }, [settings]);
 
+  const tableNumberEnabled = settings?.find((s) => s.key === "table_number_enabled")?.value === "true";
+
   return (
     <div className="flex flex-col gap-4">
       <BackendStatusCard />
+      <div className="rounded-md p-5 flex items-center justify-between gap-4" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
+        <div>
+          <div className="text-white font-semibold mb-1">Tafelnummer vragen</div>
+          <p className="text-white/40 text-xs">Vraag de gast om een tafelnummer, direct onder de naam in de quiz.</p>
+        </div>
+        <IngredientToggle available={tableNumberEnabled}
+          onChange={() => updateMutation.mutate({ key: "table_number_enabled", value: tableNumberEnabled ? "false" : "true" })} />
+      </div>
       <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
         <div className="text-white font-semibold mb-1">WhatsApp Nummer</div>
         <p className="text-white/40 text-xs mb-3">Nummer van de barman voor bestellingsmeldingen.</p>

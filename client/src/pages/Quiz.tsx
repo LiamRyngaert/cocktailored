@@ -152,6 +152,9 @@ export default function Quiz() {
   const [, setLocation] = useLocation();
   const [phase, setPhase] = useState<QuizPhase>("name");
   const [guestName, setGuestName] = useState("");
+  const [tableNumber, setTableNumber] = useState("");
+  const [tableNumberError, setTableNumberError] = useState("");
+  const { data: config } = trpc.quiz.getConfig.useQuery();
   const [currentQ, setCurrentQ] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [animState, setAnimState] = useState<"in" | "out" | "splash">("in");
@@ -170,6 +173,10 @@ export default function Quiz() {
   const handleStartQuiz = () => {
     if (!guestName.trim()) {
       setNameError("Vertel ons eerst je naam!");
+      return;
+    }
+    if (config?.tableNumberEnabled && !tableNumber.trim()) {
+      setTableNumberError("Vul je tafelnummer in!");
       return;
     }
     setPhase("questions");
@@ -236,6 +243,7 @@ export default function Quiz() {
     try {
       const result = await generateMutation.mutateAsync({
         guestName: guestName.trim() || undefined,
+        tableNumber: config?.tableNumberEnabled ? (tableNumber.trim() || undefined) : undefined,
         answers: answersArray,
         allergies: allergiesPayload.length > 0 ? allergiesPayload : undefined,
       });
@@ -280,6 +288,20 @@ export default function Quiz() {
               autoFocus
             />
             {nameError && <p className="text-red-400 text-sm mb-3">{nameError}</p>}
+            {config?.tableNumberEnabled && (
+              <>
+                <input
+                  type="text"
+                  value={tableNumber}
+                  onChange={(e) => { setTableNumber(e.target.value); setTableNumberError(""); }}
+                  onKeyDown={(e) => e.key === "Enter" && handleStartQuiz()}
+                  placeholder="Jouw tafelnummer..."
+                  className="w-full rounded-xl px-4 py-4 text-lg text-white placeholder-white/30 outline-none mb-4"
+                  style={{ background: "rgba(255,255,255,0.08)", border: "1.5px solid rgba(255,255,255,0.15)" }}
+                />
+                {tableNumberError && <p className="text-red-400 text-sm mb-3">{tableNumberError}</p>}
+              </>
+            )}
             <button
               onClick={handleStartQuiz}
               className="w-full rounded-xl py-4 text-lg font-bold text-black transition-all duration-200 active:scale-95"

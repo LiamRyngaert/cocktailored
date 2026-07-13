@@ -66,6 +66,32 @@ function isAdminSession(ctx: { req: { headers: Record<string, string | string[] 
   return cookie.includes(`${ADMIN_SESSION_KEY}=authenticated`);
 }
 
+// Every personalised cocktail is poured into the same glass, regardless of
+// the recipe, so guests comparing drinks side by side see a consistent size.
+const STANDARD_GLASS_ML = 180;
+
+function rescaleToStandardVolume(
+  ingredients: Array<{ name: string; amount: number; unit: string }>
+): Array<{ name: string; amount: number; unit: string }> {
+  if (ingredients.length === 0) return ingredients;
+  const total = ingredients.reduce((sum, i) => sum + (i.amount || 0), 0);
+  if (total <= 0) {
+    const even = Math.round(STANDARD_GLASS_ML / ingredients.length);
+    ingredients.forEach((i) => { i.amount = even; });
+  } else {
+    const scale = STANDARD_GLASS_ML / total;
+    ingredients.forEach((i) => { i.amount = Math.max(1, Math.round(i.amount * scale)); });
+  }
+  // Rounding can leave the sum a couple of ml off target; put the drift on
+  // the largest-volume ingredient where a 1-2ml shift is unnoticeable.
+  const drift = STANDARD_GLASS_ML - ingredients.reduce((sum, i) => sum + i.amount, 0);
+  if (drift !== 0) {
+    const largest = ingredients.reduce((a, b) => (b.amount > a.amount ? b : a), ingredients[0]);
+    largest.amount += drift;
+  }
+  return ingredients;
+}
+
 async function generateCocktailWithClaude(
   answers: Array<{ questionId: number; question: string; answer: string }>,
   availableIngredients: Array<{ name: string; category: string }>,
@@ -111,6 +137,7 @@ FLAVOR PSYCHOLOGY PRINCIPLES you must apply:
 
 CRITICAL RULES:
 - ALL measurements MUST be in milliliters (ml) only. No ounces, no cups, no tablespoons.
+- GLASS SIZE CONSISTENCY: every recipe's ingredient amounts must sum to exactly ${STANDARD_GLASS_ML}ml in total, so every personalised cocktail is always served in the same size glass no matter who it's for. Distribute that total across the ingredients however best fits the recipe's balance.
 - ONLY use ingredients from the provided available ingredients list.
 - Generate exactly 3 distinct cocktail variants that each express a different facet of the person's personality.
 - Each recipe must be complete, buildable by a bartender, and genuinely delicious.
@@ -272,6 +299,8 @@ Return a JSON object with this exact structure:
     if (recipe.ingredients.length < 2 && dutchIngredients.length >= 2) {
       recipe.ingredients = dutchIngredients.slice(0, 3).map((i) => ({ name: i.name, amount: 45, unit: "ml" }));
     }
+    // Every personalised cocktail is the same glass size, whatever Claude returned.
+    recipe.ingredients = rescaleToStandardVolume(recipe.ingredients);
   }
 
   return parsed;
@@ -454,6 +483,11 @@ Rules:
   }),
 
   quiz: router({
+    getConfig: publicProcedure.query(async () => {
+      const value = await getAdminSetting("table_number_enabled");
+      return { tableNumberEnabled: value === "true" };
+    }),
+
     start: publicProcedure
       .input(z.object({ guestName: z.string().max(128).optional() }))
       .mutation(async ({ input }) => {
@@ -492,6 +526,7 @@ Rules:
     generate: publicProcedure
       .input(z.object({
         guestName: z.string().max(128).optional(),
+        tableNumber: z.string().max(16).optional(),
         answers: z.array(z.object({
           questionId: z.number(),
           question: z.string(),
@@ -503,12 +538,14 @@ Rules:
         enforceRate(generateLimiter, clientIp(ctx));
         const sessionId = nanoid(16);
         const guestName = input.guestName ? sanitizeText(input.guestName) : null;
+        const tableNumber = input.tableNumber ? sanitizeText(input.tableNumber) : null;
 
         // Persist session with the real answers up front, so the order and
         // admin views never end up with an empty quiz even if generation fails.
         await createQuizSession({
           sessionId,
           guestName,
+          tableNumber,
           answers: input.answers,
           webhookSent: false,
         });
@@ -535,6 +572,7 @@ Rules:
               event: "cocktail_quiz_completed",
               sessionId,
               guestName: guestName ?? "Guest",
+              tableNumber: tableNumber ?? undefined,
               timestamp: new Date().toISOString(),
               barName: "The Beast Bar",
               location: "Indonesia",
