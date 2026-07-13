@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import QRCodeLib from "qrcode";
@@ -314,127 +314,6 @@ function IngredientToggle({ available, onChange }: { available: boolean; onChang
   );
 }
 
-// ── Photo scanner ────────────────────────────────────────────────────────────
-
-function PhotoScanner({ onAdd }: { onAdd: (name: string, category: string) => void }) {
-  const cameraRef = useRef<HTMLInputElement>(null);
-  const galleryRef = useRef<HTMLInputElement>(null);
-  const [scanning, setScanning] = useState(false);
-  const [results, setResults] = useState<Array<{ name: string; category: string; confidence: string }> | null>(null);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [adding, setAdding] = useState(false);
-
-  const scanMutation = trpc.admin.scanIngredientPhoto.useMutation({
-    onSuccess: (data) => {
-      if (!data.ingredients?.length) { toast.error("Geen ingrediënten gevonden. Probeer een scherpere foto."); setScanning(false); return; }
-      setResults(data.ingredients);
-      setSelected(new Set(data.ingredients.map((_, i) => i)));
-      setScanning(false);
-    },
-    onError: (err) => { toast.error(err.message ?? "Kon ingrediënten niet identificeren."); setScanning(false); },
-  });
-
-  const handleFile = (file: File) => {
-    if (!file.type.startsWith("image/")) { toast.error("Selecteer een afbeeldingsbestand."); return; }
-    if (file.size > 10 * 1024 * 1024) { toast.error("Afbeelding te groot. Max 10MB."); return; }
-    setScanning(true); setResults(null);
-    const reader = new FileReader();
-    reader.onerror = () => { toast.error("Kon bestand niet lezen."); setScanning(false); };
-    reader.onload = (e) => {
-      const dataUrl = e.target?.result as string;
-      if (!dataUrl) { toast.error("Kon bestand niet lezen."); setScanning(false); return; }
-      scanMutation.mutate({ imageBase64: dataUrl });
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleDrop = (e: React.DragEvent) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f); };
-  const reset = () => { setResults(null); setSelected(new Set()); setScanning(false); };
-
-  const handleAddSelected = async () => {
-    if (!results) return;
-    setAdding(true);
-    const toAdd = results.filter((_, i) => selected.has(i));
-    for (const ing of toAdd) { onAdd(ing.name, ing.category); await new Promise((r) => setTimeout(r, 80)); }
-    toast.success(`${toAdd.length} ingrediënt${toAdd.length !== 1 ? "en" : ""} toegevoegd!`);
-    setResults(null); setSelected(new Set()); setAdding(false);
-  };
-
-  const CONF_COLORS: Record<string, string> = { high: "#10b981", medium: "#f59e0b", low: "#ef4444" };
-
-  return (
-    <div className="mb-4">
-      <div className="text-white/50 text-xs uppercase tracking-wider mb-2 flex items-center gap-2">
-        <span>📸</span> Scan ingrediënten via foto
-      </div>
-      {!results && !scanning && (
-        <>
-          <div onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}
-            style={{ background: "rgba(255,255,255,0.03)", border: "1.5px dashed rgba(255,255,255,0.18)", borderRadius: "8px", padding: "20px", textAlign: "center" }}>
-            <div className="text-3xl mb-3">📷</div>
-            <div className="text-white/60 text-sm font-medium mb-4">Fotografeer een fles of barmateriaal</div>
-            <div className="flex gap-2 justify-center">
-              <button onClick={() => cameraRef.current?.click()}
-                className="flex items-center gap-2 rounded-md px-4 py-2.5 font-semibold text-black text-sm transition-all active:scale-95"
-                style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}>📸 Camera</button>
-              <button onClick={() => galleryRef.current?.click()}
-                className="flex items-center gap-2 rounded-md px-4 py-2.5 font-semibold text-white/70 text-sm transition-all hover:text-white active:scale-95"
-                style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.15)" }}>🖼 Uploaden</button>
-            </div>
-            <div className="text-white/25 text-xs mt-3">Slepen werkt ook</div>
-          </div>
-          <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
-          <input ref={galleryRef} type="file" accept="image/*" className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
-        </>
-      )}
-      {scanning && (
-        <div className="text-center py-6" style={{ background: "rgba(168,85,247,0.08)", border: "1px solid rgba(168,85,247,0.25)", borderRadius: "8px" }}>
-          <div className="text-3xl mb-2 animate-bounce">🔍</div>
-          <div className="text-white/70 text-sm">Claude identificeert je ingrediënten...</div>
-          <button onClick={reset} className="text-white/30 hover:text-white/50 text-xs mt-3 transition-colors">Annuleren</button>
-        </div>
-      )}
-      {results && (
-        <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "8px", padding: "14px" }}>
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-white text-sm font-semibold">{results.length} ingrediënt{results.length !== 1 ? "en" : ""} gevonden</div>
-            <button onClick={reset} className="text-white/30 hover:text-white/60 text-xs transition-colors">Wissen</button>
-          </div>
-          <div className="flex flex-col gap-1.5 mb-3">
-            {results.map((ing, i) => (
-              <button key={i} onClick={() => setSelected((prev) => { const s = new Set(prev); s.has(i) ? s.delete(i) : s.add(i); return s; })}
-                className="flex items-center justify-between rounded-md px-3 py-2 text-left transition-all duration-100"
-                style={{ background: selected.has(i) ? "rgba(16,185,129,0.1)" : "rgba(255,255,255,0.03)", border: selected.has(i) ? "1px solid rgba(16,185,129,0.35)" : "1px solid rgba(255,255,255,0.07)" }}>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 rounded flex items-center justify-center text-xs flex-shrink-0" style={{ background: selected.has(i) ? "#10b981" : "rgba(255,255,255,0.1)" }}>
-                    {selected.has(i) ? "✓" : ""}
-                  </div>
-                  <span className="text-white text-sm">{ing.name}</span>
-                  <span className="text-white/35 text-xs">{CATEGORY_LABELS[ing.category] ?? ing.category}</span>
-                </div>
-                <span className="text-xs font-semibold" style={{ color: CONF_COLORS[ing.confidence] }}>{ing.confidence}</span>
-              </button>
-            ))}
-          </div>
-          <div className="flex gap-2">
-            <button onClick={handleAddSelected} disabled={selected.size === 0 || adding}
-              className="flex-1 rounded-md py-2.5 font-bold text-black text-sm disabled:opacity-50 transition-all"
-              style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)" }}>
-              {adding ? "Toevoegen..." : `${selected.size} geselecteerd toevoegen`}
-            </button>
-            <button onClick={reset} className="rounded-md px-3 py-2.5 text-white/50 text-sm hover:text-white transition-colors"
-              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              Nieuwe foto
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Ingredients tab ──────────────────────────────────────────────────────────
 
 function IngredientsTab() {
@@ -496,7 +375,6 @@ function IngredientsTab() {
 
   return (
     <div className="flex flex-col gap-5">
-      <PhotoScanner onAdd={(name, category) => addMutation.mutate({ name, category })} />
       <div className="grid grid-cols-3 gap-3">
         {[
           { val: availableCount, label: "Op voorraad", bg: "rgba(16,185,129,0.12)", border: "rgba(16,185,129,0.25)" },
