@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
+import { translateIngredientName } from "@shared/ingredientTranslations";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { ENV } from "./_core/env";
 import { invokeLLM } from "./_core/llm";
@@ -82,7 +83,8 @@ async function generateCocktailWithClaude(
     profileExplanation: string;
   }>;
 }> {
-  const ingredientList = availableIngredients.map((i) => `${i.name} (${i.category})`).join(", ");
+  const dutchIngredients = availableIngredients.map((i) => ({ ...i, name: translateIngredientName(i.name) }));
+  const ingredientList = dutchIngredients.map((i) => `${i.name} (${i.category})`).join(", ");
   const answersText = answers.map((a) => `Q: ${a.question}\nA: ${a.answer}`).join("\n\n");
 
   const systemPrompt = `You are a world-class cocktail psychologist and master mixologist. You use flavor psychology research to create deeply personalised cocktail recipes.
@@ -255,7 +257,7 @@ Return a JSON object with this exact structure:
   parsed.recipes = parsed.recipes.slice(0, 3);
 
   // Enforce ml units and ingredient availability
-  const availableNames = new Set(availableIngredients.map((i) => i.name.toLowerCase()));
+  const availableNames = new Set(dutchIngredients.map((i) => i.name.toLowerCase()));
   for (const recipe of parsed.recipes) {
     for (const ing of recipe.ingredients) {
       ing.unit = "ml"; // always force ml
@@ -267,8 +269,8 @@ Return a JSON object with this exact structure:
         Array.from(availableNames).some((n) => n.includes(nameLower) || nameLower.includes(n));
     });
     // Ensure at least 2 ingredients remain
-    if (recipe.ingredients.length < 2 && availableIngredients.length >= 2) {
-      recipe.ingredients = availableIngredients.slice(0, 3).map((i) => ({ name: i.name, amount: 45, unit: "ml" }));
+    if (recipe.ingredients.length < 2 && dutchIngredients.length >= 2) {
+      recipe.ingredients = dutchIngredients.slice(0, 3).map((i) => ({ name: i.name, amount: 45, unit: "ml" }));
     }
   }
 

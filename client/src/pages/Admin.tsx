@@ -3,6 +3,7 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import QRCodeLib from "qrcode";
 import { jsPDF } from "jspdf";
+import { translateIngredientName } from "@shared/ingredientTranslations";
 
 type AdminTab = "ingredients" | "orders" | "qrcodes" | "settings";
 
@@ -421,7 +422,7 @@ function IngredientsTab() {
                   style={{ background: ing.available ? "rgba(16,185,129,0.06)" : "rgba(255,255,255,0.03)", border: ing.available ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(255,255,255,0.06)" }}>
                   <div className="flex items-center gap-2.5 min-w-0">
                     <IngredientToggle available={ing.available} onChange={() => updateMutation.mutate({ id: ing.id, available: !ing.available })} />
-                    <span className={`text-sm truncate ${ing.available ? "text-white" : "text-white/40 line-through"}`}>{ing.name}</span>
+                    <span className={`text-sm truncate ${ing.available ? "text-white" : "text-white/40 line-through"}`}>{translateIngredientName(ing.name)}</span>
                   </div>
                   {ing.isCustom && (
                     <button onClick={() => deleteMutation.mutate({ id: ing.id })}
@@ -630,7 +631,7 @@ function OrdersTab() {
                 {(recipe.ingredients ?? []).map((ing, i) => (
                   <div key={i} className="flex items-center justify-between rounded-md px-3.5 py-2.5"
                     style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)" }}>
-                    <span className="text-white text-sm font-medium">{ing.name}</span>
+                    <span className="text-white text-sm font-medium">{translateIngredientName(ing.name)}</span>
                     <span className="font-bold text-sm" style={{ color: recipe.colorHex }}>{ing.amount} {ing.unit}</span>
                   </div>
                 ))}

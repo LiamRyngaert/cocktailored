@@ -6,6 +6,7 @@ const CONSENT_FORM_VERSION = "v1";
 import CocktailGlass3D from "@/components/CocktailGlass3D";
 import LiquidSplash3D from "@/components/LiquidSplash3D";
 import { toast } from "sonner";
+import { translateIngredientName } from "@shared/ingredientTranslations";
 
 type Recipe = {
   name: string;
@@ -395,7 +396,7 @@ export default function Result() {
                 {recipe.ingredients.map((ing, i) => (
                   <div key={i} className="flex items-center justify-between rounded-md px-3.5 py-2.5"
                     style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}>
-                    <span className="text-white/80 text-sm">{ing.name}</span>
+                    <span className="text-white/80 text-sm">{translateIngredientName(ing.name)}</span>
                     <span className="font-bold text-sm" style={{ color: recipe.colorHex }}>
                       {ing.amount} {ing.unit}
                     </span>
