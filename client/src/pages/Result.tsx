@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useParams, useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 
@@ -88,6 +88,7 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, recipes, flavorP
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; age?: string; terms?: string }>({});
+  const formRef = useRef<HTMLDivElement>(null);
 
   const submitMutation = trpc.quiz.submitOrder.useMutation({
     onSuccess: () => {
@@ -111,7 +112,10 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, recipes, flavorP
   };
 
   const handleSubmit = () => {
-    if (!validate()) return;
+    if (!validate()) {
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     submitMutation.mutate({
       sessionId,
       email: email.trim(),
@@ -129,8 +133,8 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, recipes, flavorP
 
   return (
     <>
-    <div className="rounded-md p-5"
-      style={{ background: "rgba(255,107,53,0.08)", border: "2px solid rgba(255,107,53,0.35)" }}>
+    <div ref={formRef} className="rounded-md p-5"
+      style={{ background: "rgba(255,107,53,0.08)", border: "2px solid rgba(255,107,53,0.35)", scrollMarginTop: "16px" }}>
       {/* Clear intent header */}
       <div className="flex items-start gap-3 mb-4">
         <div className="w-10 h-10 rounded-md flex items-center justify-center text-xl flex-shrink-0"
