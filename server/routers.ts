@@ -6,7 +6,7 @@ import { translateIngredientName } from "@shared/ingredientTranslations";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { ENV } from "./_core/env";
 import { invokeLLM } from "./_core/llm";
-import { RateLimiter, deliverWebhook, logInfo, runBackground, singleton } from "./_core/reliability";
+import { RateLimiter, deliverWebhook, logError, logInfo, runBackground, singleton } from "./_core/reliability";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import {
@@ -184,6 +184,59 @@ Return a JSON object with this exact structure:
   ]
 }`;
 
+  // invokeLLM's "json_schema" response_format is enforced only by instruction
+  // text in the prompt for Claude (no real constrained decoding), so the model
+  // occasionally emits a syntax error (a missing colon, a stray comma) that
+  // breaks JSON.parse. Retry the whole call a couple of times before giving up
+  // — a fresh sample almost always comes back valid.
+  const MAX_ATTEMPTS = 3;
+  let parsed: ReturnType<typeof JSON.parse> | undefined;
+  let lastError: Error | undefined;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      parsed = await callClaudeForRecipes(systemPrompt, userPrompt);
+      break;
+    } catch (err) {
+      lastError = err as Error;
+      logError("llm", "cocktail generation attempt failed", { attempt, error: lastError.message });
+    }
+  }
+  if (!parsed) throw lastError ?? new Error("Claude generation failed");
+
+  // Enforce exactly 3 recipes
+  if (!parsed.recipes || parsed.recipes.length < 1) {
+    throw new Error("Claude returned no recipes");
+  }
+  while (parsed.recipes.length < 3) {
+    parsed.recipes.push({ ...parsed.recipes[0], name: `${parsed.recipes[0].name} Twist ${parsed.recipes.length + 1}` });
+  }
+  parsed.recipes = parsed.recipes.slice(0, 3);
+
+  // Enforce ml units and ingredient availability
+  const availableNames = new Set(dutchIngredients.map((i) => i.name.toLowerCase()));
+  for (const recipe of parsed.recipes) {
+    for (const ing of recipe.ingredients) {
+      ing.unit = "ml"; // always force ml
+    }
+    // Filter out ingredients not in available list (keep if name is close enough)
+    recipe.ingredients = recipe.ingredients.filter((ing: { name: string; amount: number; unit: string }) => {
+      const nameLower = ing.name.toLowerCase();
+      return availableNames.has(nameLower) ||
+        Array.from(availableNames).some((n) => n.includes(nameLower) || nameLower.includes(n));
+    });
+    // Ensure at least 2 ingredients remain
+    if (recipe.ingredients.length < 2 && dutchIngredients.length >= 2) {
+      recipe.ingredients = dutchIngredients.slice(0, 3).map((i) => ({ name: i.name, amount: 45, unit: "ml" }));
+    }
+    // Every personalised cocktail is the same glass size, whatever Claude returned.
+    recipe.ingredients = rescaleToStandardVolume(recipe.ingredients);
+  }
+
+  return parsed;
+}
+
+async function callClaudeForRecipes(systemPrompt: string, userPrompt: string): Promise<ReturnType<typeof JSON.parse>> {
   const response = await invokeLLM({
     model: "claude-haiku-4-5-20251001",
     maxTokens: 8192,
@@ -272,35 +325,6 @@ Return a JSON object with this exact structure:
     }
   } else {
     parsed = content;
-  }
-
-  // Enforce exactly 3 recipes
-  if (!parsed.recipes || parsed.recipes.length < 1) {
-    throw new Error("Claude returned no recipes");
-  }
-  while (parsed.recipes.length < 3) {
-    parsed.recipes.push({ ...parsed.recipes[0], name: `${parsed.recipes[0].name} Twist ${parsed.recipes.length + 1}` });
-  }
-  parsed.recipes = parsed.recipes.slice(0, 3);
-
-  // Enforce ml units and ingredient availability
-  const availableNames = new Set(dutchIngredients.map((i) => i.name.toLowerCase()));
-  for (const recipe of parsed.recipes) {
-    for (const ing of recipe.ingredients) {
-      ing.unit = "ml"; // always force ml
-    }
-    // Filter out ingredients not in available list (keep if name is close enough)
-    recipe.ingredients = recipe.ingredients.filter((ing: { name: string; amount: number; unit: string }) => {
-      const nameLower = ing.name.toLowerCase();
-      return availableNames.has(nameLower) ||
-        Array.from(availableNames).some((n) => n.includes(nameLower) || nameLower.includes(n));
-    });
-    // Ensure at least 2 ingredients remain
-    if (recipe.ingredients.length < 2 && dutchIngredients.length >= 2) {
-      recipe.ingredients = dutchIngredients.slice(0, 3).map((i) => ({ name: i.name, amount: 45, unit: "ml" }));
-    }
-    // Every personalised cocktail is the same glass size, whatever Claude returned.
-    recipe.ingredients = rescaleToStandardVolume(recipe.ingredients);
   }
 
   return parsed;
