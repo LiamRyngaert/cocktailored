@@ -539,14 +539,20 @@ Rules:
         const sessionId = nanoid(16);
         const guestName = input.guestName ? sanitizeText(input.guestName) : null;
         const tableNumber = input.tableNumber ? sanitizeText(input.tableNumber) : null;
+        // The production DB's quiz_sessions table predates this app and its
+        // owning role won't allow ALTER TABLE, so the table number is stored
+        // as a sentinel entry (questionId -1) inside the existing `answers`
+        // JSONB column rather than a real column. Never passed to the AI.
+        const answersForStorage = tableNumber
+          ? [...input.answers, { questionId: -1, question: "Tafelnummer", answer: tableNumber }]
+          : input.answers;
 
         // Persist session with the real answers up front, so the order and
         // admin views never end up with an empty quiz even if generation fails.
         await createQuizSession({
           sessionId,
           guestName,
-          tableNumber,
-          answers: input.answers,
+          answers: answersForStorage,
           webhookSent: false,
         });
 
@@ -555,7 +561,7 @@ Rules:
 
         // Persist the result (source of truth) before responding.
         await updateQuizSession(sessionId, {
-          answers: input.answers,
+          answers: answersForStorage,
           flavorProfile: result.flavorProfile,
           recipes: result.recipes,
           completedAt: new Date(),

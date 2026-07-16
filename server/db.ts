@@ -340,7 +340,6 @@ const SCHEMA_STATEMENTS: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS quiz_sessions_created_at_idx ON quiz_sessions (created_at)`,
   `CREATE INDEX IF NOT EXISTS quiz_sessions_order_submitted_idx ON quiz_sessions (order_submitted)`,
-  `ALTER TABLE quiz_sessions ADD COLUMN IF NOT EXISTS table_number VARCHAR(16)`,
   `CREATE TABLE IF NOT EXISTS consent_records (
     id SERIAL PRIMARY KEY,
     session_id VARCHAR(64) NOT NULL,

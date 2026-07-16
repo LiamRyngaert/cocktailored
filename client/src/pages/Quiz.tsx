@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import LiquidSplash3D from "@/components/LiquidSplash3D";
+import { toast } from "sonner";
 
 const QUESTIONS = [
   {
@@ -252,6 +253,8 @@ export default function Quiz() {
       setLocation(`/result/${result.sessionId}`);
     } catch (err) {
       console.error("Generation failed:", err);
+      toast.error("Er ging iets mis bij het mixen van je cocktail. Probeer het opnieuw.");
+      setPhase("allergies");
     }
   };
 

@@ -510,6 +510,11 @@ function saveServedMap(m: Map<number, number>) {
   localStorage.setItem(SERVED_KEY, JSON.stringify(obj));
 }
 
+function getTableNumber(session: { answers: unknown }): string | undefined {
+  const answers = session.answers as Array<{ questionId: number; answer: string }> | null;
+  return answers?.find((a) => a.questionId === -1)?.answer;
+}
+
 function OrdersTab() {
   const { data: sessions } = trpc.admin.getSessions.useQuery();
   const [servedMap, setServedMap] = useState<Map<number, number>>(() => loadServedMap());
@@ -608,10 +613,10 @@ function OrdersTab() {
         <div className="mb-5">
           <div className="flex items-center gap-2">
             <h3 className="font-display text-xl font-bold text-white">{selectedSession.guestName ?? "Anoniem"}</h3>
-            {selectedSession.tableNumber && (
+            {getTableNumber(selectedSession) && (
               <span className="text-xs font-bold rounded-full px-2.5 py-1"
                 style={{ background: "rgba(255,107,53,0.15)", color: "#ff6b35", border: "1px solid rgba(255,107,53,0.3)" }}>
-                Tafel {selectedSession.tableNumber}
+                Tafel {getTableNumber(selectedSession)}
               </span>
             )}
           </div>
@@ -721,10 +726,10 @@ function OrdersTab() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5">
                       <div className="text-white font-semibold text-sm">{session.guestName ?? "Anoniem"}</div>
-                      {session.tableNumber && (
+                      {getTableNumber(session) && (
                         <span className="text-[10px] font-bold rounded-full px-1.5 py-0.5 flex-shrink-0"
                           style={{ background: "rgba(255,107,53,0.15)", color: "#ff6b35", border: "1px solid rgba(255,107,53,0.3)" }}>
-                          T{session.tableNumber}
+                          T{getTableNumber(session)}
                         </span>
                       )}
                     </div>

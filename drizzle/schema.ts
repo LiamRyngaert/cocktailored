@@ -39,7 +39,6 @@ export const quizSessions = pgTable("quiz_sessions", {
   id: serial("id").primaryKey(),
   sessionId: varchar("session_id", { length: 64 }).notNull().unique(),
   guestName: varchar("name", { length: 128 }),
-  tableNumber: varchar("table_number", { length: 16 }),
   guestEmail: varchar("email", { length: 320 }),
   ipAddress: varchar("ip_address", { length: 64 }),
   deviceType: varchar("device_type", { length: 32 }),
