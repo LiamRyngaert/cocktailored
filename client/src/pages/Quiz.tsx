@@ -345,7 +345,7 @@ export default function Quiz() {
           </div>
         </div>
 
-        <div className="relative z-10 flex-1 flex flex-col items-center px-4 py-6 overflow-y-auto">
+        <div className="relative z-10 flex-1 flex flex-col items-center px-4 pt-6 overflow-y-auto" style={{ paddingBottom: "112px" }}>
           <div style={{ width: "100%", maxWidth: "480px" }}>
             {/* Header */}
             <div className="text-center mb-6">
@@ -401,8 +401,9 @@ export default function Quiz() {
           </div>
         </div>
 
-        {/* Sticky submit — always visible without scrolling */}
-        <div className="relative z-10 px-4 pt-3 pb-5" style={{ background: "linear-gradient(180deg, transparent, rgba(10,10,10,0.85) 30%)" }}>
+        {/* Fixed submit bar — overlaid on top of the scrollable list so it's always
+            visible in the same spot, regardless of scroll position. */}
+        <div className="fixed bottom-0 left-0 right-0 z-20 px-4 pt-3 pb-5" style={{ background: "linear-gradient(180deg, transparent, rgba(10,10,10,0.85) 30%)" }}>
           <div style={{ width: "100%", maxWidth: "480px", margin: "0 auto" }}>
             <button
               onClick={() => handleAllergySubmit(answers)}
