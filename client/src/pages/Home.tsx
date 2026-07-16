@@ -160,6 +160,10 @@ function ReviewCard({ review }: { review: { name: string; text: string; rating: 
 export default function Home() {
   const [, setLocation] = useLocation();
   const { data: reviews } = trpc.public.getReviews.useQuery();
+  // Prefetch the quiz config (e.g. whether to ask for a table number) while the
+  // guest is still on the home page, so it's already resolved by the time they
+  // tap into the quiz — instead of popping in late after a Hetzner round trip.
+  trpc.quiz.getConfig.useQuery();
   const pageRef = useRef<HTMLDivElement>(null);
   const [pageHeight, setPageHeight] = useState(3200);
 
