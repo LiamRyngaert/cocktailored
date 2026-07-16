@@ -128,6 +128,7 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, recipes, flavorP
   };
 
   return (
+    <>
     <div className="rounded-md p-5"
       style={{ background: "rgba(255,107,53,0.08)", border: "2px solid rgba(255,107,53,0.35)" }}>
       {/* Clear intent header */}
@@ -182,21 +183,29 @@ function OrderForm({ sessionId, selectedRecipeIndex, guestName, recipes, flavorP
         </label>
         {errors.terms && <p className="text-red-400 text-xs ml-7">{errors.terms}</p>}
       </div>
-
-      <button
-        onClick={handleSubmit}
-        disabled={submitMutation.isPending}
-        className="w-full rounded-md py-4 text-base font-bold text-black transition-all duration-200 active:scale-95 disabled:opacity-60"
-        style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)", boxShadow: "0 0 24px rgba(255,107,53,0.4)" }}
-      >
-        {submitMutation.isPending ? "Verzenden naar de bar..." : "Bestel Mijn Cocktail →"}
-      </button>
-
-      <p className="text-white/30 text-xs text-center mt-2.5">
-        Jouw gegevens worden alleen gebruikt om jouw drankje te bereiden.{" "}
-        <a href="/privacy" className="underline hover:text-white/50 transition-colors">Privacybeleid</a>
-      </p>
     </div>
+
+    {/* Fixed order bar — overlaid at the bottom of the viewport so it's always
+        visible and reachable, regardless of scroll position on the page. */}
+    <div className="fixed bottom-0 left-0 right-0 z-20 px-4 pt-3 pb-5"
+      style={{ background: "linear-gradient(180deg, transparent, rgba(10,10,10,0.85) 30%)" }}>
+      <div style={{ width: "100%", maxWidth: "480px", margin: "0 auto" }}>
+        <button
+          onClick={handleSubmit}
+          disabled={submitMutation.isPending}
+          className="w-full rounded-md py-4 text-base font-bold text-black transition-all duration-200 active:scale-95 disabled:opacity-60"
+          style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)", boxShadow: "0 0 24px rgba(255,107,53,0.4)" }}
+        >
+          {submitMutation.isPending ? "Verzenden naar de bar..." : "Bestel Mijn Cocktail →"}
+        </button>
+
+        <p className="text-white/30 text-xs text-center mt-2.5">
+          Jouw gegevens worden alleen gebruikt om jouw drankje te bereiden.{" "}
+          <a href="/privacy" className="underline hover:text-white/50 transition-colors">Privacybeleid</a>
+        </p>
+      </div>
+    </div>
+    </>
   );
 }
 
@@ -424,7 +433,7 @@ export default function Result() {
         </div>
 
         {/* Order section */}
-        <div className="px-4 py-4 pb-8">
+        <div className="px-4 py-4" style={{ paddingBottom: alreadyOrdered ? "2rem" : "128px" }}>
           {alreadyOrdered ? (
             <OrderConfirmation guestName={data.guestName} />
           ) : (
