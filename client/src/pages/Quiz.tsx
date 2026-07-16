@@ -398,10 +398,15 @@ export default function Quiz() {
 
             {allergyError && <p className="text-red-400 text-xs mt-1 mb-2">{allergyError}</p>}
             {!allergyError && <p className="text-white/30 text-xs mt-1 mb-4">Selecteer minstens één optie hierboven</p>}
+          </div>
+        </div>
 
+        {/* Sticky submit — always visible without scrolling */}
+        <div className="relative z-10 px-4 pt-3 pb-5" style={{ background: "linear-gradient(180deg, transparent, rgba(10,10,10,0.85) 30%)" }}>
+          <div style={{ width: "100%", maxWidth: "480px", margin: "0 auto" }}>
             <button
               onClick={() => handleAllergySubmit(answers)}
-              className="w-full rounded-xl py-4 text-lg font-bold text-white transition-all duration-200 active:scale-95 mt-2"
+              className="w-full rounded-xl py-4 text-lg font-bold text-white transition-all duration-200 active:scale-95"
               style={{ background: "linear-gradient(135deg, #0d9488, #10b981)", boxShadow: "0 0 32px rgba(16,185,129,0.4)" }}
             >
               Brew Mijn Cocktails →
