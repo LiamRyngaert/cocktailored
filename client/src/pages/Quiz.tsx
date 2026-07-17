@@ -221,11 +221,17 @@ export default function Quiz() {
     setAllergyError("");
   };
 
+  const isGeneratingRef = useRef(false);
+
   const handleAllergySubmit = (collectedAnswers: Record<number, string>) => {
     if (selectedAllergies.length === 0) {
       setAllergyError("Selecteer minstens één optie hierboven.");
       return;
     }
+    // Guard against a double-tap firing two concurrent generate calls (each
+    // would create its own quiz session) before React re-renders past this button.
+    if (isGeneratingRef.current) return;
+    isGeneratingRef.current = true;
     setPhase("generating");
     handleGenerate(collectedAnswers);
   };
@@ -254,6 +260,7 @@ export default function Quiz() {
     } catch (err) {
       console.error("Generation failed:", err);
       toast.error("Er ging iets mis bij het mixen van je cocktail. Probeer het opnieuw.");
+      isGeneratingRef.current = false;
       setPhase("allergies");
     }
   };
