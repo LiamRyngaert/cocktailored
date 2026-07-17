@@ -549,6 +549,27 @@ function OrdersTab() {
     [orderedSessions, servedMap]
   );
 
+  // Flags orders from the same guest name placed within 10 minutes of each
+  // other — the signature of a double-tap creating two sessions, as opposed
+  // to the same person genuinely returning on a different day/table.
+  const duplicateGroups = useMemo(() => {
+    const sorted = [...orderedSessions].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    const pairs: Array<{ a: (typeof sorted)[number]; b: (typeof sorted)[number]; gapMin: number }> = [];
+    for (let i = 0; i < sorted.length; i++) {
+      for (let j = i + 1; j < sorted.length; j++) {
+        const a = sorted[i], b = sorted[j];
+        const gapMs = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        if (gapMs > 10 * 60 * 1000) break; // sorted by time — no later pair can be closer
+        const nameA = (a.guestName ?? "").trim().toLowerCase();
+        const nameB = (b.guestName ?? "").trim().toLowerCase();
+        if (nameA && nameA === nameB) {
+          pairs.push({ a, b, gapMin: Math.round(gapMs / 1000 / 60 * 10) / 10 });
+        }
+      }
+    }
+    return pairs;
+  }, [orderedSessions]);
+
   const selectedSession = sessions?.find((s) => s.id === selectedId);
 
   if (showTrash) {
@@ -691,6 +712,21 @@ function OrdersTab() {
 
   return (
     <div>
+      {duplicateGroups.length > 0 && (
+        <div className="rounded-md p-4 mb-4" style={{ background: "rgba(239,68,68,0.08)", border: "1.5px solid rgba(239,68,68,0.3)" }}>
+          <div className="text-red-400 font-semibold text-sm mb-2">⚠ Mogelijk dubbele bestellingen ({duplicateGroups.length})</div>
+          <div className="flex flex-col gap-1.5">
+            {duplicateGroups.map(({ a, b, gapMin }) => (
+              <div key={`${a.id}-${b.id}`} className="text-white/60 text-xs">
+                <span className="text-white font-medium">{a.guestName}</span> — id {a.id} ({getTableNumber(a) ? `tafel ${getTableNumber(a)}, ` : ""}
+                {new Date(a.createdAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" })}) en id {b.id} (
+                {getTableNumber(b) ? `tafel ${getTableNumber(b)}, ` : ""}{new Date(b.createdAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" })})
+                — {gapMin} min. verschil
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <span className="text-white/50 text-sm">{activeSessions.length} bestellingen</span>
