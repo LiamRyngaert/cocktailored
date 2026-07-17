@@ -484,10 +484,39 @@ export async function updateQuizSession(
   await withRetry((d) => d.update(quizSessions).set(data).where(eq(quizSessions.sessionId, sessionId)));
 }
 
-export async function getAllQuizSessions() {
+// Used by the admin Bestellingen tab. Filters at the SQL level (WHERE
+// order_submitted) rather than fetching the 200 most recent quiz attempts and
+// filtering client-side — otherwise a real order could get silently pushed
+// out of the window by newer quiz-takers who never ordered.
+export async function getOrderedSessions() {
   const db = await getDb();
-  if (!db) return Array.from(_memSessions.values()).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(0, 200);
-  return (await withRetry((d) => d.select().from(quizSessions).orderBy(desc(quizSessions.createdAt)).limit(200))) ?? [];
+  if (!db) {
+    return Array.from(_memSessions.values())
+      .filter((s) => s.orderSubmitted)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, 200);
+  }
+  return (await withRetry((d) =>
+    d.select().from(quizSessions).where(eq(quizSessions.orderSubmitted, true)).orderBy(desc(quizSessions.createdAt)).limit(200)
+  )) ?? [];
+}
+
+// Clears order status on every session (email/phone/orderSubmitted) while
+// keeping the quiz answers and generated recipes intact, so Bestellingen
+// empties out without losing quiz analytics data.
+export async function clearAllOrders(): Promise<void> {
+  const db = await getDb();
+  if (!db) {
+    for (const s of Array.from(_memSessions.values())) {
+      s.orderSubmitted = false;
+      s.orderEmail = null;
+      s.orderPhone = null;
+    }
+    return;
+  }
+  await withRetry((d) =>
+    d.update(quizSessions).set({ orderSubmitted: false, orderEmail: null, orderPhone: null }).where(eq(quizSessions.orderSubmitted, true))
+  );
 }
 
 // ---- GDPR Consent Records ----

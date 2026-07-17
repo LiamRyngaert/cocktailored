@@ -11,13 +11,14 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 import {
   addCustomIngredient,
+  clearAllOrders,
   createConsentRecord,
   createQuizSession,
   deleteIngredient,
   getAdminSetting,
   getAllAdminSettings,
   getAllIngredients,
-  getAllQuizSessions,
+  getOrderedSessions,
   getAvailableIngredients,
   getQuizSession,
   getAllReviews,
@@ -415,7 +416,13 @@ export const appRouter = router({
 
     getSessions: publicProcedure.query(async ({ ctx }) => {
       if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
-      return getAllQuizSessions();
+      return getOrderedSessions();
+    }),
+
+    clearAllOrders: publicProcedure.mutation(async ({ ctx }) => {
+      if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
+      await clearAllOrders();
+      return { success: true };
     }),
 
     /**

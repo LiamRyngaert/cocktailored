@@ -1018,6 +1018,11 @@ function SettingsTab() {
   const updateMutation = trpc.admin.updateSetting.useMutation({
     onSuccess: () => { refetch(); toast.success("Opgeslagen!"); },
   });
+  const utils = trpc.useUtils();
+  const clearOrdersMutation = trpc.admin.clearAllOrders.useMutation({
+    onSuccess: () => { utils.admin.getSessions.invalidate(); toast.success("Alle bestellingen zijn verwijderd."); },
+    onError: () => toast.error("Er ging iets mis bij het verwijderen."),
+  });
   const [whatsapp, setWhatsapp] = useState("");
   useEffect(() => {
     if (settings) {
@@ -1050,6 +1055,21 @@ function SettingsTab() {
           className="rounded-md px-4 py-2 font-bold text-black text-sm disabled:opacity-50"
           style={{ background: "linear-gradient(135deg, #a855f7, #22d3ee)" }}>
           {updateMutation.isPending ? "Opslaan..." : "Opslaan"}
+        </button>
+      </div>
+      <div className="rounded-md p-5" style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.25)" }}>
+        <div className="text-white font-semibold mb-1">Alle bestellingen verwijderen</div>
+        <p className="text-white/40 text-xs mb-3">Verwijdert alle bestellingen uit Bestellingen. Quizantwoorden en recepten blijven bewaard.</p>
+        <button
+          onClick={() => {
+            if (window.confirm("Weet je zeker dat je ALLE bestellingen wilt verwijderen? Dit kan niet ongedaan worden gemaakt.")) {
+              clearOrdersMutation.mutate();
+            }
+          }}
+          disabled={clearOrdersMutation.isPending}
+          className="rounded-md px-4 py-2 font-bold text-white text-sm disabled:opacity-50"
+          style={{ background: "rgba(239,68,68,0.8)" }}>
+          {clearOrdersMutation.isPending ? "Bezig..." : "Verwijder alle bestellingen"}
         </button>
       </div>
       <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
