@@ -31,25 +31,28 @@
 
 :root {
   --radius: 0.375rem;
-  --background: oklch(0.09 0.01 260);
-  --foreground: oklch(0.97 0.005 80);
-  --card: oklch(0.13 0.015 260);
-  --card-foreground: oklch(0.97 0.005 80);
-  --popover: oklch(0.13 0.015 260);
-  --popover-foreground: oklch(0.97 0.005 80);
-  --primary: oklch(0.72 0.22 35);
-  --primary-foreground: oklch(0.09 0.01 260);
-  --secondary: oklch(0.65 0.25 300);
-  --secondary-foreground: oklch(0.97 0.005 80);
-  --muted: oklch(0.18 0.015 260);
-  --muted-foreground: oklch(0.60 0.02 260);
-  --accent: oklch(0.75 0.25 160);
-  --accent-foreground: oklch(0.09 0.01 260);
-  --destructive: oklch(0.65 0.25 25);
-  --destructive-foreground: oklch(0.97 0.005 80);
-  --border: oklch(0.22 0.02 260);
-  --input: oklch(0.18 0.015 260);
-  --ring: oklch(0.72 0.22 35);
+  /* Plain hex, not oklch() — oklch is gamut-mapped differently across browser
+     engines (notably Android's stock/Samsung WebView vs desktop Chrome/Safari),
+     which visibly shifted these colors. Hex/sRGB renders identically everywhere. */
+  --background: #020204;
+  --foreground: #f7f5f1;
+  --card: #05070d;
+  --card-foreground: #f7f5f1;
+  --popover: #05070d;
+  --popover-foreground: #f7f5f1;
+  --primary: #ff6134;
+  --primary-foreground: #020204;
+  --secondary: #aa5aff;
+  --secondary-foreground: #f7f5f1;
+  --muted: #0e1218;
+  --muted-foreground: #79818d;
+  --accent: #00da73;
+  --accent-foreground: #020204;
+  --destructive: #ff2335;
+  --destructive-foreground: #f7f5f1;
+  --border: #151b24;
+  --input: #0e1218;
+  --ring: #ff6134;
 }
 
 @layer base {
@@ -177,7 +180,7 @@
 .wiggle { animation: wiggle 0.5s ease-in-out; }
 
 ::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: oklch(0.13 0.015 260); }
-::-webkit-scrollbar-thumb { background: oklch(0.35 0.05 260); border-radius: 3px; }
+::-webkit-scrollbar-track { background: #05070d; }
+::-webkit-scrollbar-thumb { background: #2b3b55; border-radius: 3px; }
 
 canvas { display: block; }
