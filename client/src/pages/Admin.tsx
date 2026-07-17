@@ -517,10 +517,16 @@ function getTableNumber(session: { answers: unknown }): string | undefined {
 
 function OrdersTab() {
   const { data: sessions } = trpc.admin.getSessions.useQuery();
+  const utils = trpc.useUtils();
+  const clearOrdersMutation = trpc.admin.clearAllOrders.useMutation({
+    onSuccess: () => { utils.admin.getSessions.invalidate(); toast.success("Alle bestellingen zijn verwijderd."); },
+    onError: () => toast.error("Er ging iets mis bij het verwijderen."),
+  });
   const [servedMap, setServedMap] = useState<Map<number, number>>(() => loadServedMap());
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [showTrash, setShowTrash] = useState(false);
+  const [hideEmpty, setHideEmpty] = useState(true);
 
   const markServed = (id: number) =>
     setServedMap((prev) => { const m = new Map(prev); m.set(id, Date.now()); saveServedMap(m); return m; });
@@ -534,10 +540,17 @@ function OrdersTab() {
     [sessions]
   );
 
+  const hasRecipe = (s: (typeof orderedSessions)[number]) => {
+    const recipes = s.recipes as AdminRecipe[] | null;
+    const idx = s.selectedRecipeIndex ?? 0;
+    return !!recipes?.[idx]?.name;
+  };
+
   const activeSessions = useMemo(() =>
     orderedSessions.filter((s) => !servedMap.has(s.id) &&
-      (s.guestName ?? "").toLowerCase().includes(search.toLowerCase())),
-    [orderedSessions, servedMap, search]
+      (s.guestName ?? "").toLowerCase().includes(search.toLowerCase()) &&
+      (!hideEmpty || hasRecipe(s))),
+    [orderedSessions, servedMap, search, hideEmpty]
   );
 
   const now = Date.now();
@@ -727,7 +740,7 @@ function OrdersTab() {
           </div>
         </div>
       )}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <span className="text-white/50 text-sm">{activeSessions.length} bestellingen</span>
           {trashSessions.length > 0 && (
@@ -744,6 +757,28 @@ function OrdersTab() {
             className="rounded-md pl-7 pr-3 py-2 text-white placeholder-white/30 outline-none text-xs"
             style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", width: "160px" }} />
         </div>
+      </div>
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <button onClick={() => setHideEmpty((v) => !v)}
+          className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-all"
+          style={{
+            background: hideEmpty ? "rgba(16,185,129,0.12)" : "rgba(255,255,255,0.05)",
+            border: hideEmpty ? "1px solid rgba(16,185,129,0.3)" : "1px solid rgba(255,255,255,0.08)",
+            color: hideEmpty ? "#10b981" : "rgba(255,255,255,0.5)",
+          }}>
+          {hideEmpty ? "✓" : ""} Verberg lege bestellingen
+        </button>
+        <button
+          onClick={() => {
+            if (window.confirm("Weet je zeker dat je ALLE bestellingen wilt verwijderen? Dit kan niet ongedaan worden gemaakt.")) {
+              clearOrdersMutation.mutate();
+            }
+          }}
+          disabled={clearOrdersMutation.isPending}
+          className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-all disabled:opacity-50"
+          style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", color: "#ef4444" }}>
+          🗑 {clearOrdersMutation.isPending ? "Bezig..." : "Leeg alle bestellingen"}
+        </button>
       </div>
       <div className="flex flex-col gap-2">
         {activeSessions.map((session) => {
