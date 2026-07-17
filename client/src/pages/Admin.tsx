@@ -489,6 +489,13 @@ type AdminRecipe = {
 
 const SERVED_KEY = "bb_served_map";
 const ONE_HOUR = 60 * 60 * 1000;
+// Served entries only need to stick around long enough to (a) show in the
+// 1-hour trash grace window and (b) keep the session out of the active list
+// forever after. Pruning on THAT same 1-hour threshold would un-serve the
+// order the moment it aged out of localStorage, making it pop back into
+// Bestellingen as if never served — so storage cleanup uses a much longer
+// window purely to cap growth, not to expire "served" status itself.
+const SERVED_STORAGE_TTL = 90 * 24 * ONE_HOUR;
 
 function loadServedMap(): Map<number, number> {
   try {
@@ -498,7 +505,7 @@ function loadServedMap(): Map<number, number> {
     const now = Date.now();
     const m = new Map<number, number>();
     for (const [k, v] of Object.entries(obj)) {
-      if (now - v < ONE_HOUR) m.set(Number(k), v);
+      if (now - v < SERVED_STORAGE_TTL) m.set(Number(k), v);
     }
     return m;
   } catch { return new Map(); }
@@ -517,11 +524,6 @@ function getTableNumber(session: { answers: unknown }): string | undefined {
 
 function OrdersTab() {
   const { data: sessions } = trpc.admin.getSessions.useQuery();
-  const utils = trpc.useUtils();
-  const clearOrdersMutation = trpc.admin.clearAllOrders.useMutation({
-    onSuccess: () => { utils.admin.getSessions.invalidate(); toast.success("Alle bestellingen zijn verwijderd."); },
-    onError: () => toast.error("Er ging iets mis bij het verwijderen."),
-  });
   const [servedMap, setServedMap] = useState<Map<number, number>>(() => loadServedMap());
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
@@ -533,6 +535,19 @@ function OrdersTab() {
 
   const unmarkServed = (id: number) =>
     setServedMap((prev) => { const m = new Map(prev); m.delete(id); saveServedMap(m); return m; });
+
+  // Empties the trash view immediately instead of waiting out the 1-hour
+  // grace window — ages every currently-trashed timestamp past ONE_HOUR so
+  // it drops out of the trash filter, while staying in servedMap so the
+  // order does NOT reappear as active.
+  const emptyTrash = () =>
+    setServedMap((prev) => {
+      const m = new Map(prev);
+      const expired = Date.now() - ONE_HOUR - 1000;
+      trashSessions.forEach((s) => m.set(s.id, expired));
+      saveServedMap(m);
+      return m;
+    });
 
   // Only sessions where client actually pressed Order
   const orderedSessions = useMemo(() =>
@@ -592,9 +607,18 @@ function OrdersTab() {
           className="flex items-center gap-2 text-white/50 hover:text-white text-sm mb-5 transition-colors">
           ← Terug naar bestellingen
         </button>
-        <div className="mb-4">
-          <h3 className="font-display text-lg font-bold text-white">Prullenbak</h3>
-          <p className="text-white/40 text-xs mt-0.5">Geserveerde bestellingen — automatisch verwijderd na 1 uur.</p>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="font-display text-lg font-bold text-white">Prullenbak</h3>
+            <p className="text-white/40 text-xs mt-0.5">Geserveerde bestellingen — automatisch verwijderd na 1 uur.</p>
+          </div>
+          {trashSessions.length > 0 && (
+            <button onClick={emptyTrash}
+              className="flex-shrink-0 flex items-center gap-1.5 rounded-md px-3 py-2 text-xs font-semibold transition-all"
+              style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", color: "#ef4444" }}>
+              🗑 Leeg prullenbak
+            </button>
+          )}
         </div>
         <div className="flex flex-col gap-2">
           {trashSessions.length === 0 ? (
@@ -767,17 +791,6 @@ function OrdersTab() {
             color: hideEmpty ? "#10b981" : "rgba(255,255,255,0.5)",
           }}>
           {hideEmpty ? "✓" : ""} Verberg lege bestellingen
-        </button>
-        <button
-          onClick={() => {
-            if (window.confirm("Weet je zeker dat je ALLE bestellingen wilt verwijderen? Dit kan niet ongedaan worden gemaakt.")) {
-              clearOrdersMutation.mutate();
-            }
-          }}
-          disabled={clearOrdersMutation.isPending}
-          className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-semibold transition-all disabled:opacity-50"
-          style={{ background: "rgba(239,68,68,0.12)", border: "1px solid rgba(239,68,68,0.3)", color: "#ef4444" }}>
-          🗑 {clearOrdersMutation.isPending ? "Bezig..." : "Leeg alle bestellingen"}
         </button>
       </div>
       <div className="flex flex-col gap-2">
