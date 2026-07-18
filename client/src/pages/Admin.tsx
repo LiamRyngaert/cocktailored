@@ -643,7 +643,7 @@ function OrdersTab() {
     const isServed = servedMap.has(selectedSession.id);
 
     return (
-      <div>
+      <div style={{ paddingBottom: recipe ? "128px" : 0 }}>
         <button onClick={() => setSelectedId(null)}
           className="flex items-center gap-2 text-white/50 hover:text-white text-sm mb-5 transition-colors">
           ← Terug naar bestellingen
@@ -705,23 +705,31 @@ function OrdersTab() {
               </div>
             </div>
 
-            {isServed ? (
-              <div className="rounded-md p-5 text-center" style={{ background: "rgba(16,185,129,0.1)", border: "2px solid rgba(16,185,129,0.4)" }}>
-                <div className="text-3xl mb-2">✅</div>
-                <div className="font-bold text-white text-lg">Geserveerd!</div>
-                <p className="text-white/50 text-xs mt-1">Cocktail is aan de gast overhandigd.</p>
-                <button onClick={() => { unmarkServed(selectedSession.id); setSelectedId(null); }}
-                  className="mt-3 text-white/30 hover:text-white/60 text-xs underline transition-colors">
-                  Ongedaan maken
-                </button>
+            {/* Fixed at the bottom of the viewport — overlaid on top of the
+                scrollable recipe/ingredients/instructions above, so it's
+                always visible and reachable no matter how far you scroll. */}
+            <div className="fixed bottom-0 left-0 right-0 z-20 px-4 pt-3 pb-5"
+              style={{ background: "linear-gradient(180deg, transparent, rgba(10,10,10,0.85) 30%)" }}>
+              <div style={{ width: "100%", maxWidth: "480px", margin: "0 auto" }}>
+                {isServed ? (
+                  <div className="rounded-md p-5 text-center" style={{ background: "rgba(16,185,129,0.1)", border: "2px solid rgba(16,185,129,0.4)" }}>
+                    <div className="text-3xl mb-2">✅</div>
+                    <div className="font-bold text-white text-lg">Geserveerd!</div>
+                    <p className="text-white/50 text-xs mt-1">Cocktail is aan de gast overhandigd.</p>
+                    <button onClick={() => { unmarkServed(selectedSession.id); setSelectedId(null); }}
+                      className="mt-3 text-white/30 hover:text-white/60 text-xs underline transition-colors">
+                      Ongedaan maken
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={() => { markServed(selectedSession.id); setSelectedId(null); }}
+                    className="w-full rounded-md py-4 text-lg font-bold text-white transition-all duration-200 active:scale-95"
+                    style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)", boxShadow: "0 0 32px rgba(16,185,129,0.4)" }}>
+                    ✓ Markeer als geserveerd
+                  </button>
+                )}
               </div>
-            ) : (
-              <button onClick={() => { markServed(selectedSession.id); setSelectedId(null); }}
-                className="w-full rounded-md py-4 text-lg font-bold text-white transition-all duration-200 active:scale-95"
-                style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)", boxShadow: "0 0 32px rgba(16,185,129,0.4)" }}>
-                ✓ Markeer als geserveerd
-              </button>
-            )}
+            </div>
           </>
         )}
       </div>
