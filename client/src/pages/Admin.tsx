@@ -754,8 +754,10 @@ function OrdersTab() {
           const idx = session.selectedRecipeIndex ?? 0;
           const recipe = recipes?.[idx];
           return (
-            <button key={session.id} onClick={() => setSelectedId(session.id)}
-              className="w-full rounded-md overflow-hidden text-left transition-all duration-150 hover:border-white/20"
+            <div key={session.id} role="button" tabIndex={0}
+              onClick={() => setSelectedId(session.id)}
+              onKeyDown={(e) => { if (e.key === "Enter") setSelectedId(session.id); }}
+              className="w-full rounded-md overflow-hidden text-left transition-all duration-150 hover:border-white/20 cursor-pointer"
               style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
               <div className="flex items-center justify-between px-4 py-3.5">
                 <div className="flex items-center gap-3 min-w-0">
@@ -779,9 +781,18 @@ function OrdersTab() {
                     </div>
                   </div>
                 </div>
-                <span className="text-white/30 text-sm flex-shrink-0 ml-2">→</span>
+                <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); markServed(session.id); }}
+                    title="Markeer als geserveerd"
+                    className="rounded-md px-2.5 py-1.5 text-xs font-bold transition-all active:scale-95"
+                    style={{ background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.35)", color: "#10b981" }}>
+                    ✓ Geserveerd
+                  </button>
+                  <span className="text-white/30 text-sm">→</span>
+                </div>
               </div>
-            </button>
+            </div>
           );
         })}
         {activeSessions.length === 0 && (
