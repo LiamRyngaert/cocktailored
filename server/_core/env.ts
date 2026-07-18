@@ -10,6 +10,8 @@ export const ENV = {
   s3AccessKey: process.env.S3_ACCESS_KEY ?? "",
   s3SecretKey: process.env.S3_SECRET_KEY ?? "",
   s3Region: process.env.S3_REGION ?? "eu-central",
+  printifyApiToken: process.env.PRINTIFY_API_TOKEN ?? "",
+  printifyShopId: process.env.PRINTIFY_SHOP_ID ?? "1",
   // Legacy stubs — unused, kept for compilation only
   appId: "",
   oAuthServerUrl: "",

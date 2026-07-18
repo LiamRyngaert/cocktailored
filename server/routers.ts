@@ -6,6 +6,7 @@ import { translateIngredientName } from "@shared/ingredientTranslations";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { ENV } from "./_core/env";
 import { invokeLLM } from "./_core/llm";
+import * as printify from "./_core/printify";
 import { RateLimiter, deliverWebhook, logError, logInfo, runBackground, singleton } from "./_core/reliability";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
@@ -28,6 +29,9 @@ import {
 } from "./db";
 
 const ADMIN_SESSION_KEY = "beast_admin_session";
+// Printify catalog blueprint for "Square Vinyl Stickers" — durable, waterproof,
+// good for table/bar surfaces. Confirmed via the Printify catalog UI.
+const STICKER_BLUEPRINT_ID = 476;
 
 // The single LeadConnector webhook the bar's automations listen on.
 const WEBHOOK_URL = "https://services.leadconnectorhq.com/hooks/8nDL9BCU3hp9982tGYT1/webhook-trigger/71aa3d40-0ead-46d9-9255-2bbe7caa770d";
@@ -423,6 +427,97 @@ export const appRouter = router({
       if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
       await clearAllOrders();
       return { success: true };
+    }),
+
+    shop: router({
+      // Whether Printify is configured and whether a sticker product already
+      // exists, so the admin UI knows what step to show.
+      status: publicProcedure.query(async ({ ctx }) => {
+        if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
+        const productId = await getAdminSetting("printify_sticker_product_id");
+        return { configured: printify.isPrintifyConfigured(), productId };
+      }),
+
+      // One-time (or re-run to refresh the design) setup: uploads the current
+      // QR sticker artwork to Printify and creates a product from it. Costs
+      // nothing — creating a catalog product isn't a purchase.
+      setupStickerProduct: publicProcedure
+        .input(z.object({ imageBase64: z.string().min(100) }))
+        .mutation(async ({ input, ctx }) => {
+          if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
+          if (!printify.isPrintifyConfigured()) {
+            throw new TRPCError({ code: "PRECONDITION_FAILED", message: "PRINTIFY_API_TOKEN is not configured" });
+          }
+          const base64 = input.imageBase64.replace(/^data:image\/\w+;base64,/, "");
+          const uploaded = await printify.uploadImage("cocktailored-qr-sticker.png", base64);
+
+          const providers = await printify.getPrintProviders(STICKER_BLUEPRINT_ID);
+          const provider = providers.find((p) => p.title === "Printed Simply") ?? providers[0];
+          if (!provider) {
+            throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No print provider available for sticker blueprint" });
+          }
+
+          const { variants } = await printify.getVariants(STICKER_BLUEPRINT_ID, provider.id);
+          if (variants.length === 0) {
+            throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No variants available for this print provider" });
+          }
+          const placeholderPosition = variants[0].placeholders?.[0]?.position ?? "front";
+
+          const product = await printify.createProduct({
+            title: "Cocktailored QR Sticker",
+            description: "Gepersonaliseerde QR-sticker die naar de Cocktailored cocktailquiz linkt.",
+            blueprintId: STICKER_BLUEPRINT_ID,
+            printProviderId: provider.id,
+            imageId: uploaded.id,
+            variants: variants.map((v) => ({ id: v.id, price: 500, isEnabled: true })),
+            placeholderPosition,
+          });
+
+          await setAdminSetting("printify_sticker_product_id", product.id);
+          await setAdminSetting("printify_print_provider_id", String(provider.id));
+          return { productId: product.id };
+        }),
+
+      // Fetches the live product (with Printify-generated mockup images) for
+      // display in the admin Shop tab.
+      getStickerProduct: publicProcedure.query(async ({ ctx }) => {
+        if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
+        const productId = await getAdminSetting("printify_sticker_product_id");
+        if (!productId) return null;
+        return printify.getProduct(productId);
+      }),
+
+      // Places a REAL, paid print order through Printify — charges the
+      // payment method on file. Only ever called by an explicit admin click.
+      orderStickers: publicProcedure
+        .input(z.object({
+          variantId: z.number(),
+          quantity: z.number().int().min(1).max(1000),
+          shippingMethod: z.number().int().default(1),
+          addressTo: z.object({
+            firstName: z.string().min(1),
+            lastName: z.string().min(1),
+            email: z.string().email(),
+            phone: z.string().min(3),
+            country: z.string().min(2),
+            region: z.string().optional().default(""),
+            address1: z.string().min(1),
+            city: z.string().min(1),
+            zip: z.string().min(1),
+          }),
+        }))
+        .mutation(async ({ input, ctx }) => {
+          if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
+          const productId = await getAdminSetting("printify_sticker_product_id");
+          if (!productId) {
+            throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No sticker product set up yet" });
+          }
+          return printify.createOrder({
+            lineItems: [{ productId, variantId: input.variantId, quantity: input.quantity }],
+            addressTo: input.addressTo,
+            shippingMethod: input.shippingMethod,
+          });
+        }),
     }),
 
     /**

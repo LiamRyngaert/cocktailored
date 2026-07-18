@@ -5,7 +5,7 @@ import QRCodeLib from "qrcode";
 import { jsPDF } from "jspdf";
 import { translateIngredientName } from "@shared/ingredientTranslations";
 
-type AdminTab = "ingredients" | "orders" | "qrcodes" | "settings";
+type AdminTab = "ingredients" | "orders" | "qrcodes" | "shop" | "settings";
 
 const CATEGORIES = ["spirits", "liqueurs", "mixers", "juices", "syrups", "bitters", "garnishes", "other"];
 
@@ -1071,6 +1071,202 @@ function BackendStatusCard() {
   );
 }
 
+// ── Shop tab ─────────────────────────────────────────────────────────────────
+
+const SHOP_ADDRESS_KEY = "bb_shop_address";
+
+type ShopAddress = {
+  firstName: string; lastName: string; email: string; phone: string;
+  country: string; region: string; address1: string; city: string; zip: string;
+};
+
+function loadShopAddress(): ShopAddress {
+  try {
+    const raw = localStorage.getItem(SHOP_ADDRESS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return { firstName: "", lastName: "", email: "", phone: "", country: "", region: "", address1: "", city: "", zip: "" };
+}
+
+async function buildStickerPrintImage(): Promise<string> {
+  const size = 1000;
+  const styled = renderRoundedQR(QR_URL, size, 0);
+  const logoImg = await loadImage("/brand/cocktail-logo.jpeg");
+  drawCenterLogo(styled, logoImg);
+  return styled.toDataURL("image/png");
+}
+
+function ShopTab() {
+  const { data: status, refetch: refetchStatus } = trpc.admin.shop.status.useQuery();
+  const { data: product, refetch: refetchProduct } = trpc.admin.shop.getStickerProduct.useQuery(undefined, {
+    enabled: !!status?.productId,
+  });
+  const [settingUp, setSettingUp] = useState(false);
+  const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
+  const [quantity, setQuantity] = useState(50);
+  const [address, setAddress] = useState<ShopAddress>(() => loadShopAddress());
+  const [showOrderForm, setShowOrderForm] = useState(false);
+
+  const setupMutation = trpc.admin.shop.setupStickerProduct.useMutation({
+    onSuccess: () => { toast.success("Stickerproduct aangemaakt in Printify!"); refetchStatus(); refetchProduct(); },
+    onError: (err) => toast.error(`Kon product niet aanmaken: ${err.message}`),
+    onSettled: () => setSettingUp(false),
+  });
+
+  const orderMutation = trpc.admin.shop.orderStickers.useMutation({
+    onSuccess: () => { toast.success("Bestelling geplaatst bij Printify!"); setShowOrderForm(false); },
+    onError: (err) => toast.error(`Bestelling mislukt: ${err.message}`),
+  });
+
+  const handleSetup = async () => {
+    setSettingUp(true);
+    try {
+      const imageBase64 = await buildStickerPrintImage();
+      setupMutation.mutate({ imageBase64 });
+    } catch {
+      toast.error("Kon de sticker-afbeelding niet genereren.");
+      setSettingUp(false);
+    }
+  };
+
+  const enabledVariants = (product?.variants ?? []).filter((v) => v.is_enabled);
+  const activeVariantId = selectedVariantId ?? enabledVariants[0]?.id ?? null;
+  const mockups = product?.images.filter((img) => !activeVariantId || img.variant_ids.includes(activeVariantId)) ?? [];
+
+  const handleOrderSubmit = () => {
+    if (!activeVariantId) return;
+    localStorage.setItem(SHOP_ADDRESS_KEY, JSON.stringify(address));
+    if (!window.confirm(`Dit plaatst een ECHTE bestelling bij Printify voor ${quantity} stickers en belast jouw betaalmethode. Doorgaan?`)) return;
+    orderMutation.mutate({
+      variantId: activeVariantId,
+      quantity,
+      addressTo: address,
+    });
+  };
+
+  if (!status?.configured) {
+    return (
+      <div className="rounded-md p-5" style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.25)" }}>
+        <div className="text-white font-semibold mb-1">Printify is niet ingesteld</div>
+        <p className="text-white/50 text-sm">Voeg <code className="text-white/70">PRINTIFY_API_TOKEN</code> toe aan de environment variables in Vercel om deze tab te gebruiken.</p>
+      </div>
+    );
+  }
+
+  if (!status.productId) {
+    return (
+      <div className="rounded-md p-6 text-center" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+        <div className="text-4xl mb-3">🏷️</div>
+        <div className="font-display text-lg font-bold text-white mb-2">Nog geen stickerproduct</div>
+        <p className="text-white/50 text-sm mb-4 max-w-md mx-auto">
+          Maak een stickerproduct aan in Printify met jouw huidige QR-ontwerp. Dit kost niets — pas het echt bestellen van stickers kost geld.
+        </p>
+        <button onClick={handleSetup} disabled={settingUp}
+          className="rounded-md px-5 py-3 font-bold text-black text-sm disabled:opacity-50"
+          style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}>
+          {settingUp ? "Bezig..." : "Stickerproduct opzetten in Printify"}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-white font-semibold">{product?.title ?? "Cocktailored QR Sticker"}</div>
+          <button onClick={handleSetup} disabled={settingUp}
+            className="text-xs text-white/40 hover:text-white/70 underline transition-colors disabled:opacity-50">
+            {settingUp ? "Bezig..." : "Ontwerp vernieuwen"}
+          </button>
+        </div>
+
+        {mockups.length > 0 ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+            {mockups.map((img, i) => (
+              <img key={i} src={img.src} alt="Sticker preview" className="w-full aspect-square object-cover rounded-md" style={{ border: "1px solid rgba(255,255,255,0.1)" }} />
+            ))}
+          </div>
+        ) : (
+          <p className="text-white/40 text-xs mb-4">Printify genereert nog previews — ververs zo dadelijk.</p>
+        )}
+
+        {enabledVariants.length > 0 && (
+          <div className="mb-4">
+            <label className="block text-white/50 text-xs uppercase tracking-wider mb-1.5">Formaat</label>
+            <div className="flex flex-wrap gap-2">
+              {enabledVariants.map((v) => (
+                <button key={v.id} onClick={() => setSelectedVariantId(v.id)}
+                  className="rounded-md px-3 py-2 text-xs font-medium transition-all"
+                  style={{
+                    background: activeVariantId === v.id ? "rgba(255,107,53,0.15)" : "rgba(255,255,255,0.05)",
+                    border: activeVariantId === v.id ? "1px solid rgba(255,107,53,0.35)" : "1px solid rgba(255,255,255,0.1)",
+                    color: activeVariantId === v.id ? "#ff6b35" : "rgba(255,255,255,0.6)",
+                  }}>
+                  {v.title}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="mb-4" style={{ maxWidth: "160px" }}>
+          <label className="block text-white/50 text-xs uppercase tracking-wider mb-1.5">Aantal</label>
+          <input type="number" min={1} max={1000} value={quantity} onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+            className="w-full rounded-md px-3 py-2 text-white outline-none text-sm"
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+        </div>
+
+        {!showOrderForm ? (
+          <button onClick={() => setShowOrderForm(true)} disabled={!activeVariantId}
+            className="rounded-md px-5 py-3 font-bold text-black text-sm disabled:opacity-50"
+            style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)" }}>
+            Stickers bestellen →
+          </button>
+        ) : (
+          <div className="rounded-md p-4" style={{ background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.2)" }}>
+            <div className="text-white font-semibold text-sm mb-3">Bezorgadres</div>
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <input placeholder="Voornaam" value={address.firstName} onChange={(e) => setAddress({ ...address, firstName: e.target.value })}
+                className="rounded-md px-3 py-2 text-white placeholder-white/30 outline-none text-sm" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+              <input placeholder="Achternaam" value={address.lastName} onChange={(e) => setAddress({ ...address, lastName: e.target.value })}
+                className="rounded-md px-3 py-2 text-white placeholder-white/30 outline-none text-sm" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+            </div>
+            <input placeholder="E-mailadres" value={address.email} onChange={(e) => setAddress({ ...address, email: e.target.value })}
+              className="w-full rounded-md px-3 py-2 text-white placeholder-white/30 outline-none text-sm mb-2" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+            <input placeholder="Telefoonnummer" value={address.phone} onChange={(e) => setAddress({ ...address, phone: e.target.value })}
+              className="w-full rounded-md px-3 py-2 text-white placeholder-white/30 outline-none text-sm mb-2" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+            <input placeholder="Adres" value={address.address1} onChange={(e) => setAddress({ ...address, address1: e.target.value })}
+              className="w-full rounded-md px-3 py-2 text-white placeholder-white/30 outline-none text-sm mb-2" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <input placeholder="Stad" value={address.city} onChange={(e) => setAddress({ ...address, city: e.target.value })}
+                className="rounded-md px-3 py-2 text-white placeholder-white/30 outline-none text-sm" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+              <input placeholder="Postcode" value={address.zip} onChange={(e) => setAddress({ ...address, zip: e.target.value })}
+                className="rounded-md px-3 py-2 text-white placeholder-white/30 outline-none text-sm" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+            </div>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              <input placeholder="Provincie/regio" value={address.region} onChange={(e) => setAddress({ ...address, region: e.target.value })}
+                className="rounded-md px-3 py-2 text-white placeholder-white/30 outline-none text-sm" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+              <input placeholder="Landcode (bv. ID, US)" value={address.country} onChange={(e) => setAddress({ ...address, country: e.target.value })}
+                className="rounded-md px-3 py-2 text-white placeholder-white/30 outline-none text-sm" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={handleOrderSubmit} disabled={orderMutation.isPending}
+                className="rounded-md px-5 py-3 font-bold text-black text-sm disabled:opacity-50"
+                style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)" }}>
+                {orderMutation.isPending ? "Bezig..." : `Bevestig bestelling (${quantity}x)`}
+              </button>
+              <button onClick={() => setShowOrderForm(false)} className="text-white/40 hover:text-white/70 text-sm transition-colors px-3">
+                Annuleren
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SettingsTab() {
   const { data: settings, refetch } = trpc.admin.getSettings.useQuery();
   const updateMutation = trpc.admin.updateSetting.useMutation({
@@ -1157,6 +1353,7 @@ export default function Admin() {
     { id: "ingredients", label: "Ingrediënten", icon: "🍹" },
     { id: "orders", label: "Bestellingen", icon: "📋" },
     { id: "qrcodes", label: "QR Codes", icon: "⬛" },
+    { id: "shop", label: "Shop", icon: "🛒" },
     { id: "settings", label: "Instellingen", icon: "⚙️" },
   ];
 
@@ -1164,6 +1361,7 @@ export default function Admin() {
     ingredients: "Schakel in/uit wat op voorraad is. Claude gebruikt alleen beschikbare ingrediënten.",
     orders: "Alle bestellingen en gegenereerde cocktails.",
     qrcodes: "Genereer en download QR codes voor jouw bar.",
+    shop: "Bestel fysieke producten met jouw QR-ontwerp, geleverd via Printify.",
     settings: "Meldingsinstellingen.",
   };
 
@@ -1229,6 +1427,7 @@ export default function Admin() {
             {activeTab === "ingredients" && <IngredientsTab />}
             {activeTab === "orders" && <OrdersTab />}
             {activeTab === "qrcodes" && <QRCodesTab />}
+            {activeTab === "shop" && <ShopTab />}
             {activeTab === "settings" && <SettingsTab />}
           </div>
         </div>
