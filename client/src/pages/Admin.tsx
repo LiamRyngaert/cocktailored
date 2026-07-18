@@ -1134,7 +1134,6 @@ function SettingsTab() {
         <div className="text-white font-semibold mb-2">Systeeminformatie</div>
         <div className="text-white/40 text-xs space-y-1">
           <p>Bar: The Beast Bar, Indonesië</p>
-          <p>AI model: Claude by Anthropic</p>
           <p>Smaakmodel: 15-principe psychologie</p>
           <p>Maten: milliliters</p>
         </div>
