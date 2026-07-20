@@ -31,6 +31,10 @@ export type PrintifyVariant = {
   placeholders?: Array<{ position: string; height: number; width: number }>;
 };
 
+export async function getShops(): Promise<Array<{ id: number; title: string; sales_channel: string }>> {
+  return printifyFetch("/shops.json");
+}
+
 export async function getPrintProviders(blueprintId: number): Promise<PrintifyPrintProvider[]> {
   return printifyFetch(`/catalog/blueprints/${blueprintId}/print_providers.json`);
 }

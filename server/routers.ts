@@ -438,6 +438,13 @@ export const appRouter = router({
         return { configured: printify.isPrintifyConfigured(), productId };
       }),
 
+      // Diagnostic: lists every shop this Printify token can see, so a wrong
+      // PRINTIFY_SHOP_ID can be told apart from a bad token.
+      debugShops: publicProcedure.query(async ({ ctx }) => {
+        if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
+        return printify.getShops();
+      }),
+
       // One-time (or re-run to refresh the design) setup: uploads the current
       // QR sticker artwork to Printify and creates a product from it. Costs
       // nothing — creating a catalog product isn't a purchase.
