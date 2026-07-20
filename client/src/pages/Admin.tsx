@@ -176,12 +176,12 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-function buildCardCanvas(qrCanvas: HTMLCanvasElement): HTMLCanvasElement {
+function buildCardCanvas(qrCanvas: HTMLCanvasElement, outerRadius = 56): HTMLCanvasElement {
   const SIZE = 900, QR = 640;
   const off = document.createElement("canvas");
   off.width = SIZE; off.height = SIZE;
   const ctx = off.getContext("2d")!;
-  const r = 56;
+  const r = outerRadius;
   ctx.save();
   ctx.beginPath();
   ctx.moveTo(r, 0); ctx.lineTo(SIZE - r, 0); ctx.quadraticCurveTo(SIZE, 0, SIZE, r);
@@ -1090,13 +1090,16 @@ function loadShopAddress(): ShopAddress {
 
 // Same design as the downloadable card in QR Codes — QR + logo, wrapped in
 // the full branded card with the "ORDER YOUR PERSONALIZED COCKTAIL" header
-// and "Cocktailored" footer — not just the bare QR square.
+// and "Cocktailored" footer — not just the bare QR square. Square corners
+// (outerRadius 0) here — Printify's own die-cut shapes the sticker, so
+// pre-rounded corners in the source PNG just show up as an unwanted white
+// gap inside the actual cut line.
 async function buildStickerPrintImage(): Promise<string> {
   const size = 400;
   const styled = renderRoundedQR(QR_URL, size, 0);
   const logoImg = await loadImage("/brand/cocktail-logo.jpeg");
   drawCenterLogo(styled, logoImg);
-  const card = buildCardCanvas(styled);
+  const card = buildCardCanvas(styled, 0);
   return card.toDataURL("image/png");
 }
 
