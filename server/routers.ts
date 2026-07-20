@@ -31,7 +31,38 @@ import {
 const ADMIN_SESSION_KEY = "beast_admin_session";
 // Printify catalog blueprint for "Square Vinyl Stickers" — durable, waterproof,
 // good for table/bar surfaces. Confirmed via the Printify catalog UI.
-const STICKER_BLUEPRINT_ID = 476;
+// Every product the Shop tab can create in Printify. Blueprint ids and
+// preferred providers were confirmed by hand in the Printify catalog —
+// each has real auto-generated mockups (not an "Early Access" blueprint
+// with no preview images).
+const SHOP_PRODUCTS: Record<string, {
+  blueprintId: number; title: string; description: string; preferredProvider: string;
+}> = {
+  sticker: {
+    blueprintId: 476,
+    title: "Cocktailored QR Sticker",
+    description: "Gepersonaliseerde QR-sticker die naar de Cocktailored cocktailquiz linkt.",
+    preferredProvider: "Printed Simply",
+  },
+  sticker_roll: {
+    blueprintId: 1387,
+    title: "Cocktailored QR Stickerrol",
+    description: "Rol met Cocktailored QR-stickers voor op elke tafel.",
+    preferredProvider: "Printed Simply",
+  },
+  beer_mug: {
+    blueprintId: 1131,
+    title: "Cocktailored Bierpul",
+    description: "Beslagen bierpul met het Cocktailored QR-ontwerp.",
+    preferredProvider: "Imagine Your Photos",
+  },
+  coaster: {
+    blueprintId: 480,
+    title: "Cocktailored Onderzetter",
+    description: "Kurken onderzetter met het Cocktailored QR-ontwerp.",
+    preferredProvider: "Printed Mint",
+  },
+};
 
 // The single LeadConnector webhook the bar's automations listen on.
 const WEBHOOK_URL = "https://services.leadconnectorhq.com/hooks/8nDL9BCU3hp9982tGYT1/webhook-trigger/71aa3d40-0ead-46d9-9255-2bbe7caa770d";
@@ -430,12 +461,15 @@ export const appRouter = router({
     }),
 
     shop: router({
-      // Whether Printify is configured and whether a sticker product already
-      // exists, so the admin UI knows what step to show.
+      // Whether Printify is configured, and which of SHOP_PRODUCTS already
+      // have a live Printify product id, so the admin UI knows what each
+      // product tile should show.
       status: publicProcedure.query(async ({ ctx }) => {
         if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
-        const productId = await getAdminSetting("printify_sticker_product_id");
-        return { configured: printify.isPrintifyConfigured(), productId };
+        const entries = await Promise.all(
+          Object.keys(SHOP_PRODUCTS).map(async (key) => [key, await getAdminSetting(`printify_product_${key}`)] as const)
+        );
+        return { configured: printify.isPrintifyConfigured(), products: Object.fromEntries(entries) };
       }),
 
       // Diagnostic: lists every shop this Printify token can see, so a wrong
@@ -445,59 +479,64 @@ export const appRouter = router({
         return printify.getShops();
       }),
 
-      // One-time (or re-run to refresh the design) setup: uploads the current
-      // QR sticker artwork to Printify and creates a product from it. Costs
-      // nothing — creating a catalog product isn't a purchase.
-      setupStickerProduct: publicProcedure
-        .input(z.object({ imageBase64: z.string().min(100) }))
+      // One-time (or re-run to refresh the design) setup: uploads the given
+      // artwork to Printify and creates a product for the given catalog
+      // entry. Costs nothing — creating a catalog product isn't a purchase.
+      setupProduct: publicProcedure
+        .input(z.object({ productKey: z.string(), imageBase64: z.string().min(100) }))
         .mutation(async ({ input, ctx }) => {
           if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
           if (!printify.isPrintifyConfigured()) {
             throw new TRPCError({ code: "PRECONDITION_FAILED", message: "PRINTIFY_API_TOKEN is not configured" });
           }
-          const base64 = input.imageBase64.replace(/^data:image\/\w+;base64,/, "");
-          const uploaded = await printify.uploadImage("cocktailored-qr-sticker.png", base64);
+          const def = SHOP_PRODUCTS[input.productKey];
+          if (!def) throw new TRPCError({ code: "BAD_REQUEST", message: "Unknown product" });
 
-          const providers = await printify.getPrintProviders(STICKER_BLUEPRINT_ID);
-          const provider = providers.find((p) => p.title === "Printed Simply") ?? providers[0];
+          const base64 = input.imageBase64.replace(/^data:image\/\w+;base64,/, "");
+          const uploaded = await printify.uploadImage(`cocktailored-${input.productKey}.png`, base64);
+
+          const providers = await printify.getPrintProviders(def.blueprintId);
+          const provider = providers.find((p) => p.title === def.preferredProvider) ?? providers[0];
           if (!provider) {
-            throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No print provider available for sticker blueprint" });
+            throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No print provider available for this blueprint" });
           }
 
-          const { variants } = await printify.getVariants(STICKER_BLUEPRINT_ID, provider.id);
+          const { variants } = await printify.getVariants(def.blueprintId, provider.id);
           if (variants.length === 0) {
             throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No variants available for this print provider" });
           }
           const placeholderPosition = variants[0].placeholders?.[0]?.position ?? "front";
 
           const product = await printify.createProduct({
-            title: "Cocktailored QR Sticker",
-            description: "Gepersonaliseerde QR-sticker die naar de Cocktailored cocktailquiz linkt.",
-            blueprintId: STICKER_BLUEPRINT_ID,
+            title: def.title,
+            description: def.description,
+            blueprintId: def.blueprintId,
             printProviderId: provider.id,
             imageId: uploaded.id,
             variants: variants.map((v) => ({ id: v.id, price: 500, isEnabled: true })),
             placeholderPosition,
           });
 
-          await setAdminSetting("printify_sticker_product_id", product.id);
-          await setAdminSetting("printify_print_provider_id", String(provider.id));
+          await setAdminSetting(`printify_product_${input.productKey}`, product.id);
           return { productId: product.id };
         }),
 
       // Fetches the live product (with Printify-generated mockup images) for
       // display in the admin Shop tab.
-      getStickerProduct: publicProcedure.query(async ({ ctx }) => {
-        if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
-        const productId = await getAdminSetting("printify_sticker_product_id");
-        if (!productId) return null;
-        return printify.getProduct(productId);
-      }),
+      getProduct: publicProcedure
+        .input(z.object({ productKey: z.string() }))
+        .query(async ({ input, ctx }) => {
+          if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
+          const productId = await getAdminSetting(`printify_product_${input.productKey}`);
+          if (!productId) return null;
+          return printify.getProduct(productId);
+        }),
 
       // Places a REAL, paid print order through Printify — charges the
       // payment method on file. Only ever called by an explicit admin click.
-      orderStickers: publicProcedure
+      orderProduct: publicProcedure
         .input(z.object({
+          productKey: z.string(),
           variantId: z.number(),
           quantity: z.number().int().min(1).max(1000),
           shippingMethod: z.number().int().default(1),
@@ -515,9 +554,9 @@ export const appRouter = router({
         }))
         .mutation(async ({ input, ctx }) => {
           if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
-          const productId = await getAdminSetting("printify_sticker_product_id");
+          const productId = await getAdminSetting(`printify_product_${input.productKey}`);
           if (!productId) {
-            throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No sticker product set up yet" });
+            throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No product set up yet" });
           }
           return printify.createOrder({
             lineItems: [{ productId, variantId: input.variantId, quantity: input.quantity }],

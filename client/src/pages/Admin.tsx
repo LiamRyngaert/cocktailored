@@ -1094,7 +1094,11 @@ function loadShopAddress(): ShopAddress {
 // (outerRadius 0) here — Printify's own die-cut shapes the sticker, so
 // pre-rounded corners in the source PNG just show up as an unwanted white
 // gap inside the actual cut line.
-async function buildStickerPrintImage(): Promise<string> {
+// Same branded card design across every product — QR + logo, wrapped in the
+// full card ("ORDER YOUR PERSONALIZED COCKTAIL" header, Cocktailored
+// footer) with square corners so each print provider's own die-cut/print
+// area defines the shape, not a pre-baked rounded PNG.
+async function buildProductArtwork(): Promise<string> {
   const size = 400;
   const styled = renderRoundedQR(QR_URL, size, 0);
   const logoImg = await loadImage("/brand/cocktail-logo.jpeg");
@@ -1103,53 +1107,206 @@ async function buildStickerPrintImage(): Promise<string> {
   return card.toDataURL("image/png");
 }
 
-function ShopTab() {
-  const { data: status, refetch: refetchStatus } = trpc.admin.shop.status.useQuery();
-  const { data: product, refetch: refetchProduct } = trpc.admin.shop.getStickerProduct.useQuery(undefined, {
-    enabled: !!status?.productId,
-  });
+const SHOP_PRODUCT_DEFS: Array<{ key: string; label: string; emoji: string }> = [
+  { key: "sticker", label: "QR Sticker", emoji: "🏷️" },
+  { key: "sticker_roll", label: "Stickerrol", emoji: "🧻" },
+  { key: "beer_mug", label: "Bierpul", emoji: "🍺" },
+  { key: "coaster", label: "Onderzetter", emoji: "🥌" },
+];
+
+// A product-page-style image carousel — one photo at a time, prev/next
+// arrows, dot indicators — the way a real webshop shows product photos
+// instead of a flat grid of thumbnails.
+function ImageCarousel({ images }: { images: Array<{ src: string }> }) {
+  const [idx, setIdx] = useState(0);
+  if (images.length === 0) return null;
+  const i = Math.min(idx, images.length - 1);
+  return (
+    <div className="relative">
+      <img src={images[i].src} alt="" className="w-full aspect-square object-cover rounded-md"
+        style={{ background: "#fff", border: "1px solid rgba(255,255,255,0.1)" }} />
+      {images.length > 1 && (
+        <>
+          <button onClick={() => setIdx((v) => (v - 1 + images.length) % images.length)}
+            className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full flex items-center justify-center text-white text-sm"
+            style={{ background: "rgba(0,0,0,0.55)" }}>‹</button>
+          <button onClick={() => setIdx((v) => (v + 1) % images.length)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full flex items-center justify-center text-white text-sm"
+            style={{ background: "rgba(0,0,0,0.55)" }}>›</button>
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
+            {images.map((_, dotIdx) => (
+              <div key={dotIdx} className="w-1.5 h-1.5 rounded-full transition-all"
+                style={{ background: dotIdx === i ? "#ff6b35" : "rgba(255,255,255,0.4)" }} />
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// One self-contained "webshop tile" per product: its own preview carousel,
+// size picker, quantity, and order form — same shape a real product page
+// on a webshop would have, just for a physical print-on-demand product.
+function ProductCard({ productKey, label, emoji, productId }: {
+  productKey: string; label: string; emoji: string; productId: string | null;
+}) {
+  const utils = trpc.useUtils();
+  const { data: product, refetch: refetchProduct } = trpc.admin.shop.getProduct.useQuery(
+    { productKey }, { enabled: !!productId }
+  );
   const [settingUp, setSettingUp] = useState(false);
   const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
   const [quantity, setQuantity] = useState(50);
   const [address, setAddress] = useState<ShopAddress>(() => loadShopAddress());
   const [showOrderForm, setShowOrderForm] = useState(false);
 
-  const setupMutation = trpc.admin.shop.setupStickerProduct.useMutation({
-    onSuccess: () => { toast.success("Stickerproduct aangemaakt in Printify!"); refetchStatus(); refetchProduct(); },
-    onError: (err) => toast.error(`Kon product niet aanmaken: ${err.message}`),
+  const setupMutation = trpc.admin.shop.setupProduct.useMutation({
+    onSuccess: () => { toast.success(`${label} aangemaakt in Printify!`); utils.admin.shop.status.invalidate(); refetchProduct(); },
+    onError: (err: { message: string }) => toast.error(`Kon product niet aanmaken: ${err.message}`),
     onSettled: () => setSettingUp(false),
   });
 
-  const orderMutation = trpc.admin.shop.orderStickers.useMutation({
+  const orderMutation = trpc.admin.shop.orderProduct.useMutation({
     onSuccess: () => { toast.success("Bestelling geplaatst bij Printify!"); setShowOrderForm(false); },
-    onError: (err) => toast.error(`Bestelling mislukt: ${err.message}`),
+    onError: (err: { message: string }) => toast.error(`Bestelling mislukt: ${err.message}`),
   });
 
   const handleSetup = async () => {
     setSettingUp(true);
     try {
-      const imageBase64 = await buildStickerPrintImage();
-      setupMutation.mutate({ imageBase64 });
+      const imageBase64 = await buildProductArtwork();
+      setupMutation.mutate({ productKey, imageBase64 });
     } catch {
-      toast.error("Kon de sticker-afbeelding niet genereren.");
+      toast.error("Kon de afbeelding niet genereren.");
       setSettingUp(false);
     }
   };
 
-  const enabledVariants = (product?.variants ?? []).filter((v) => v.is_enabled);
+  const enabledVariants = (product?.variants ?? []).filter((v: { is_enabled: boolean }) => v.is_enabled);
   const activeVariantId = selectedVariantId ?? enabledVariants[0]?.id ?? null;
-  const mockups = product?.images.filter((img) => !activeVariantId || img.variant_ids.includes(activeVariantId)) ?? [];
+  const mockups = product?.images.filter((img: { variant_ids: number[] }) =>
+    !activeVariantId || img.variant_ids.includes(activeVariantId)) ?? [];
+  const startPrice = enabledVariants.length > 0
+    ? Math.min(...enabledVariants.map((v: { price: number }) => v.price)) / 100
+    : null;
 
   const handleOrderSubmit = () => {
     if (!activeVariantId) return;
     localStorage.setItem(SHOP_ADDRESS_KEY, JSON.stringify(address));
-    if (!window.confirm(`Dit plaatst een ECHTE bestelling bij Printify voor ${quantity} stickers en belast jouw betaalmethode. Doorgaan?`)) return;
-    orderMutation.mutate({
-      variantId: activeVariantId,
-      quantity,
-      addressTo: address,
-    });
+    if (!window.confirm(`Dit plaatst een ECHTE bestelling bij Printify voor ${quantity}x ${label} en belast jouw betaalmethode. Doorgaan?`)) return;
+    orderMutation.mutate({ productKey, variantId: activeVariantId, quantity, addressTo: address });
   };
+
+  return (
+    <div className="rounded-md overflow-hidden flex flex-col" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+      <div className="p-4 flex flex-col flex-1">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <span className="text-base">{emoji}</span>
+            <div className="text-white font-semibold text-sm">{label}</div>
+          </div>
+          {startPrice !== null && <div className="text-white/40 text-xs">v.a. €{startPrice.toFixed(2)}</div>}
+        </div>
+
+        {!productId ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-center py-8">
+            <p className="text-white/40 text-xs mb-3">Nog niet opgezet in Printify.</p>
+            <button onClick={handleSetup} disabled={settingUp}
+              className="rounded-md px-4 py-2 font-bold text-black text-xs disabled:opacity-50"
+              style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}>
+              {settingUp ? "Bezig..." : "Opzetten"}
+            </button>
+          </div>
+        ) : (
+          <>
+            {mockups.length > 0
+              ? <ImageCarousel images={mockups} />
+              : <p className="text-white/40 text-xs py-8 text-center">Previews laden...</p>}
+            <button onClick={handleSetup} disabled={settingUp}
+              className="text-[11px] text-white/40 hover:text-white/70 underline transition-colors mt-2 self-start">
+              {settingUp ? "Bezig..." : "Ontwerp vernieuwen"}
+            </button>
+
+            {enabledVariants.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-3">
+                {enabledVariants.map((v: { id: number; title: string }) => (
+                  <button key={v.id} onClick={() => setSelectedVariantId(v.id)}
+                    className="rounded-md px-2 py-1 text-[11px] font-medium transition-all"
+                    style={{
+                      background: activeVariantId === v.id ? "rgba(255,107,53,0.15)" : "rgba(255,255,255,0.05)",
+                      border: activeVariantId === v.id ? "1px solid rgba(255,107,53,0.35)" : "1px solid rgba(255,255,255,0.1)",
+                      color: activeVariantId === v.id ? "#ff6b35" : "rgba(255,255,255,0.6)",
+                    }}>
+                    {v.title}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {!showOrderForm ? (
+              <div className="flex items-end gap-2 mt-3">
+                <div style={{ maxWidth: "90px" }}>
+                  <label className="block text-white/40 text-[10px] uppercase tracking-wider mb-1">Aantal</label>
+                  <input type="number" min={1} max={1000} value={quantity}
+                    onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-full rounded-md px-2.5 py-2 text-white outline-none text-sm"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+                <button onClick={() => setShowOrderForm(true)} disabled={!activeVariantId}
+                  className="flex-1 rounded-md py-2.5 font-bold text-black text-xs disabled:opacity-50"
+                  style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)" }}>
+                  Bestellen →
+                </button>
+              </div>
+            ) : (
+              <div className="mt-3 rounded-md p-3" style={{ background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.2)" }}>
+                <div className="text-white font-semibold text-xs mb-2">Bezorgadres</div>
+                <div className="grid grid-cols-2 gap-1.5 mb-1.5">
+                  <input placeholder="Voornaam" value={address.firstName} onChange={(e) => setAddress({ ...address, firstName: e.target.value })}
+                    className="rounded-md px-2.5 py-1.5 text-white placeholder-white/30 outline-none text-xs" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                  <input placeholder="Achternaam" value={address.lastName} onChange={(e) => setAddress({ ...address, lastName: e.target.value })}
+                    className="rounded-md px-2.5 py-1.5 text-white placeholder-white/30 outline-none text-xs" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+                <input placeholder="E-mailadres" value={address.email} onChange={(e) => setAddress({ ...address, email: e.target.value })}
+                  className="w-full rounded-md px-2.5 py-1.5 text-white placeholder-white/30 outline-none text-xs mb-1.5" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                <input placeholder="Telefoonnummer" value={address.phone} onChange={(e) => setAddress({ ...address, phone: e.target.value })}
+                  className="w-full rounded-md px-2.5 py-1.5 text-white placeholder-white/30 outline-none text-xs mb-1.5" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                <input placeholder="Adres" value={address.address1} onChange={(e) => setAddress({ ...address, address1: e.target.value })}
+                  className="w-full rounded-md px-2.5 py-1.5 text-white placeholder-white/30 outline-none text-xs mb-1.5" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                <div className="grid grid-cols-2 gap-1.5 mb-1.5">
+                  <input placeholder="Stad" value={address.city} onChange={(e) => setAddress({ ...address, city: e.target.value })}
+                    className="rounded-md px-2.5 py-1.5 text-white placeholder-white/30 outline-none text-xs" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                  <input placeholder="Postcode" value={address.zip} onChange={(e) => setAddress({ ...address, zip: e.target.value })}
+                    className="rounded-md px-2.5 py-1.5 text-white placeholder-white/30 outline-none text-xs" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 mb-2">
+                  <input placeholder="Provincie/regio" value={address.region} onChange={(e) => setAddress({ ...address, region: e.target.value })}
+                    className="rounded-md px-2.5 py-1.5 text-white placeholder-white/30 outline-none text-xs" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                  <input placeholder="Landcode (bv. ID, US)" value={address.country} onChange={(e) => setAddress({ ...address, country: e.target.value })}
+                    className="rounded-md px-2.5 py-1.5 text-white placeholder-white/30 outline-none text-xs" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={handleOrderSubmit} disabled={orderMutation.isPending}
+                    className="rounded-md px-3 py-2 font-bold text-black text-xs disabled:opacity-50"
+                    style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)" }}>
+                    {orderMutation.isPending ? "Bezig..." : `Bevestig (${quantity}x)`}
+                  </button>
+                  <button onClick={() => setShowOrderForm(false)} className="text-white/40 hover:text-white/70 text-xs transition-colors px-2">
+                    Annuleren
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ShopTab() {
+  const { data: status } = trpc.admin.shop.status.useQuery();
 
   if (!status?.configured) {
     return (
@@ -1160,116 +1317,12 @@ function ShopTab() {
     );
   }
 
-  if (!status.productId) {
-    return (
-      <div className="rounded-md p-6 text-center" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-        <div className="text-4xl mb-3">🏷️</div>
-        <div className="font-display text-lg font-bold text-white mb-2">Nog geen stickerproduct</div>
-        <p className="text-white/50 text-sm mb-4 max-w-md mx-auto">
-          Maak een stickerproduct aan in Printify met jouw huidige QR-ontwerp. Dit kost niets — pas het echt bestellen van stickers kost geld.
-        </p>
-        <button onClick={handleSetup} disabled={settingUp}
-          className="rounded-md px-5 py-3 font-bold text-black text-sm disabled:opacity-50"
-          style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}>
-          {settingUp ? "Bezig..." : "Stickerproduct opzetten in Printify"}
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col gap-4">
-      <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-        <div className="flex items-center justify-between mb-4">
-          <div className="text-white font-semibold">{product?.title ?? "Cocktailored QR Sticker"}</div>
-          <button onClick={handleSetup} disabled={settingUp}
-            className="text-xs text-white/40 hover:text-white/70 underline transition-colors disabled:opacity-50">
-            {settingUp ? "Bezig..." : "Ontwerp vernieuwen"}
-          </button>
-        </div>
-
-        {mockups.length > 0 ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
-            {mockups.map((img, i) => (
-              <img key={i} src={img.src} alt="Sticker preview" className="w-full aspect-square object-cover rounded-md" style={{ border: "1px solid rgba(255,255,255,0.1)" }} />
-            ))}
-          </div>
-        ) : (
-          <p className="text-white/40 text-xs mb-4">Printify genereert nog previews — ververs zo dadelijk.</p>
-        )}
-
-        {enabledVariants.length > 0 && (
-          <div className="mb-4">
-            <label className="block text-white/50 text-xs uppercase tracking-wider mb-1.5">Formaat</label>
-            <div className="flex flex-wrap gap-2">
-              {enabledVariants.map((v) => (
-                <button key={v.id} onClick={() => setSelectedVariantId(v.id)}
-                  className="rounded-md px-3 py-2 text-xs font-medium transition-all"
-                  style={{
-                    background: activeVariantId === v.id ? "rgba(255,107,53,0.15)" : "rgba(255,255,255,0.05)",
-                    border: activeVariantId === v.id ? "1px solid rgba(255,107,53,0.35)" : "1px solid rgba(255,255,255,0.1)",
-                    color: activeVariantId === v.id ? "#ff6b35" : "rgba(255,255,255,0.6)",
-                  }}>
-                  {v.title}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="mb-4" style={{ maxWidth: "160px" }}>
-          <label className="block text-white/50 text-xs uppercase tracking-wider mb-1.5">Aantal</label>
-          <input type="number" min={1} max={1000} value={quantity} onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-            className="w-full rounded-md px-3 py-2 text-white outline-none text-sm"
-            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
-        </div>
-
-        {!showOrderForm ? (
-          <button onClick={() => setShowOrderForm(true)} disabled={!activeVariantId}
-            className="rounded-md px-5 py-3 font-bold text-black text-sm disabled:opacity-50"
-            style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)" }}>
-            Stickers bestellen →
-          </button>
-        ) : (
-          <div className="rounded-md p-4" style={{ background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.2)" }}>
-            <div className="text-white font-semibold text-sm mb-3">Bezorgadres</div>
-            <div className="grid grid-cols-2 gap-2 mb-2">
-              <input placeholder="Voornaam" value={address.firstName} onChange={(e) => setAddress({ ...address, firstName: e.target.value })}
-                className="rounded-md px-3 py-2 text-white placeholder-white/30 outline-none text-sm" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
-              <input placeholder="Achternaam" value={address.lastName} onChange={(e) => setAddress({ ...address, lastName: e.target.value })}
-                className="rounded-md px-3 py-2 text-white placeholder-white/30 outline-none text-sm" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
-            </div>
-            <input placeholder="E-mailadres" value={address.email} onChange={(e) => setAddress({ ...address, email: e.target.value })}
-              className="w-full rounded-md px-3 py-2 text-white placeholder-white/30 outline-none text-sm mb-2" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
-            <input placeholder="Telefoonnummer" value={address.phone} onChange={(e) => setAddress({ ...address, phone: e.target.value })}
-              className="w-full rounded-md px-3 py-2 text-white placeholder-white/30 outline-none text-sm mb-2" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
-            <input placeholder="Adres" value={address.address1} onChange={(e) => setAddress({ ...address, address1: e.target.value })}
-              className="w-full rounded-md px-3 py-2 text-white placeholder-white/30 outline-none text-sm mb-2" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
-            <div className="grid grid-cols-2 gap-2 mb-2">
-              <input placeholder="Stad" value={address.city} onChange={(e) => setAddress({ ...address, city: e.target.value })}
-                className="rounded-md px-3 py-2 text-white placeholder-white/30 outline-none text-sm" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
-              <input placeholder="Postcode" value={address.zip} onChange={(e) => setAddress({ ...address, zip: e.target.value })}
-                className="rounded-md px-3 py-2 text-white placeholder-white/30 outline-none text-sm" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
-            </div>
-            <div className="grid grid-cols-2 gap-2 mb-3">
-              <input placeholder="Provincie/regio" value={address.region} onChange={(e) => setAddress({ ...address, region: e.target.value })}
-                className="rounded-md px-3 py-2 text-white placeholder-white/30 outline-none text-sm" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
-              <input placeholder="Landcode (bv. ID, US)" value={address.country} onChange={(e) => setAddress({ ...address, country: e.target.value })}
-                className="rounded-md px-3 py-2 text-white placeholder-white/30 outline-none text-sm" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
-            </div>
-            <div className="flex gap-2">
-              <button onClick={handleOrderSubmit} disabled={orderMutation.isPending}
-                className="rounded-md px-5 py-3 font-bold text-black text-sm disabled:opacity-50"
-                style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)" }}>
-                {orderMutation.isPending ? "Bezig..." : `Bevestig bestelling (${quantity}x)`}
-              </button>
-              <button onClick={() => setShowOrderForm(false)} className="text-white/40 hover:text-white/70 text-sm transition-colors px-3">
-                Annuleren
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      {SHOP_PRODUCT_DEFS.map((def) => (
+        <ProductCard key={def.key} productKey={def.key} label={def.label} emoji={def.emoji}
+          productId={status.products[def.key] ?? null} />
+      ))}
     </div>
   );
 }
