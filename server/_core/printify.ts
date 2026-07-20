@@ -197,6 +197,18 @@ export async function createOrder(params: {
   return result;
 }
 
+// Submitting an order via createOrder() only creates a draft — Printify does
+// NOT charge the payment method or start manufacturing until this separate
+// call. Every real purchase must call both, in sequence.
+export async function sendOrderToProduction(orderId: string): Promise<{ id: string; status: string }> {
+  const result = await printifyFetch<{ id: string; status: string }>(
+    `/shops/${ENV.printifyShopId}/orders/${orderId}/send_to_production.json`,
+    { method: "POST" }
+  );
+  logInfo("printify", "order sent to production (charged)", { orderId: result.id });
+  return result;
+}
+
 export function isPrintifyConfigured(): boolean {
   return !!ENV.printifyApiToken;
 }

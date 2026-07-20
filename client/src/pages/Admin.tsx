@@ -1214,8 +1214,22 @@ function ProductCard({ productKey, label, emoji, productId }: {
     }
   };
 
+  // Required delivery-address fields — a location is mandatory before a real
+  // order (and real charge) can go out. Region is the only optional field
+  // (many countries don't use states/provinces), matching the server schema.
+  const addressComplete = !!(
+    address.firstName.trim() && address.lastName.trim() &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address.email) &&
+    address.phone.trim() && address.address1.trim() &&
+    address.city.trim() && address.zip.trim() && address.country.trim()
+  );
+
   const handleOrderSubmit = () => {
     if (!activeVariantId) return;
+    if (!addressComplete) {
+      toast.error("Vul eerst een volledig bezorgadres in (naam, e-mail, telefoon, adres, stad, postcode, land).");
+      return;
+    }
     localStorage.setItem(SHOP_ADDRESS_KEY, JSON.stringify(address));
     const totalLabel = totalCents !== null ? ` (totaal €${(totalCents / 100).toFixed(2)}${shippingCents === null ? " excl. verzending" : ""})` : "";
     if (!window.confirm(`Dit plaatst een ECHTE bestelling bij Printify voor ${quantity}x ${label}${totalLabel} en belast jouw betaalmethode. Doorgaan?`)) return;
@@ -1329,8 +1343,11 @@ function ProductCard({ productKey, label, emoji, productId }: {
                   </p>
                 )}
 
+                {!addressComplete && (
+                  <p className="text-amber-400 text-[11px] mb-2">Vul een volledig bezorgadres in om te kunnen bestellen.</p>
+                )}
                 <div className="flex gap-2">
-                  <button onClick={handleOrderSubmit} disabled={orderMutation.isPending}
+                  <button onClick={handleOrderSubmit} disabled={orderMutation.isPending || !addressComplete}
                     className="rounded-md px-3 py-2 font-bold text-black text-xs disabled:opacity-50"
                     style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)" }}>
                     {orderMutation.isPending ? "Bezig..." : `Bevestig (${quantity}x)`}

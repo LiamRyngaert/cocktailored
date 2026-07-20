@@ -591,11 +591,14 @@ export const appRouter = router({
           if (!productId) {
             throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No product set up yet" });
           }
-          return printify.createOrder({
+          const order = await printify.createOrder({
             lineItems: [{ productId, variantId: input.variantId, quantity: input.quantity }],
             addressTo: input.addressTo,
             shippingMethod: input.shippingMethod,
           });
+          // createOrder alone only creates a draft — this is the call that
+          // actually charges the payment method on file and starts production.
+          return printify.sendOrderToProduction(order.id);
         }),
     }),
 
