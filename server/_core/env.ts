@@ -11,7 +11,11 @@ export const ENV = {
   s3SecretKey: process.env.S3_SECRET_KEY ?? "",
   s3Region: process.env.S3_REGION ?? "eu-central",
   printifyApiToken: process.env.PRINTIFY_API_TOKEN ?? "",
-  printifyShopId: process.env.PRINTIFY_SHOP_ID ?? "1",
+  // Confirmed via admin.shop.debugShops — "My new store" is the only shop
+  // this Printify token can see, and its real id is 25691872 (not the "1"
+  // that appears in Printify's own dashboard URLs, which is just a route
+  // index, not the API shop id).
+  printifyShopId: process.env.PRINTIFY_SHOP_ID ?? "25691872",
   // Legacy stubs — unused, kept for compilation only
   appId: "",
   oAuthServerUrl: "",
