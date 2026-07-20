@@ -72,6 +72,11 @@ export async function createProduct(params: {
   imageId: string;
   variants: Array<{ id: number; price: number; isEnabled: boolean }>;
   placeholderPosition: string;
+  // Printify scale semantics: 1 = image width fills the full print-area
+  // width. For wide print areas (e.g. a mug's wraparound) a square image
+  // at scale 1 overflows vertically and gets cropped, so callers pass a
+  // computed contain-fit scale instead of a hardcoded 1.
+  imageScale: number;
 }): Promise<PrintifyProduct> {
   return printifyFetch(`/shops/${ENV.printifyShopId}/products.json`, {
     method: "POST",
@@ -87,7 +92,7 @@ export async function createProduct(params: {
           placeholders: [
             {
               position: params.placeholderPosition,
-              images: [{ id: params.imageId, x: 0.5, y: 0.5, scale: 1, angle: 0 }],
+              images: [{ id: params.imageId, x: 0.5, y: 0.5, scale: params.imageScale, angle: 0 }],
             },
           ],
         },

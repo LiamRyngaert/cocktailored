@@ -518,7 +518,19 @@ export const appRouter = router({
           if (variants.length === 0) {
             throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "No variants available for this print provider" });
           }
-          const placeholderPosition = variants[0].placeholders?.[0]?.position ?? "front";
+          const placeholder = variants[0].placeholders?.[0];
+          const placeholderPosition = placeholder?.position ?? "front";
+
+          // Contain-fit for our square (1:1) artwork. Printify's scale is
+          // relative to print-area WIDTH, so on a wide area (mug wraparound)
+          // scale 1 makes a square image overflow vertically and get cropped
+          // to a zoomed mess of QR blocks. Fitting the height instead keeps
+          // the whole card visible: the image's rendered height fraction is
+          // scale × (areaWidth/areaHeight), which must stay ≤ 1.
+          let imageScale = 1;
+          if (placeholder && placeholder.width > 0 && placeholder.height > 0) {
+            imageScale = Math.min(1, placeholder.height / placeholder.width);
+          }
 
           // Placeholder price on creation — Printify only tells us its real
           // per-variant manufacturing cost in the response, so the actual
@@ -531,6 +543,7 @@ export const appRouter = router({
             imageId: uploaded.id,
             variants: variants.map((v) => ({ id: v.id, price: 100, isEnabled: true })),
             placeholderPosition,
+            imageScale,
           });
 
           const priced = await printify.updateProductVariantPrices(
