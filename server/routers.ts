@@ -29,8 +29,9 @@ import {
 } from "./db";
 
 const ADMIN_SESSION_KEY = "beast_admin_session";
-// Printify catalog blueprint for "Square Vinyl Stickers" — durable, waterproof,
-// good for table/bar surfaces. Confirmed via the Printify catalog UI.
+// Flat margin (in cents) added on top of Printify's real manufacturing cost
+// for every shop product variant.
+const MARGIN_CENTS = 50;
 // Every product the Shop tab can create in Printify. Blueprint ids and
 // preferred providers were confirmed by hand in the Printify catalog —
 // each has real auto-generated mockups (not an "Early Access" blueprint
@@ -63,6 +64,18 @@ const SHOP_PRODUCTS: Record<string, {
     preferredProvider: "Printed Mint",
   },
 };
+
+const SHOP_ADDRESS_SCHEMA = z.object({
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
+  email: z.string().email(),
+  phone: z.string().min(3),
+  country: z.string().min(2),
+  region: z.string().optional().default(""),
+  address1: z.string().min(1),
+  city: z.string().min(1),
+  zip: z.string().min(1),
+});
 
 // The single LeadConnector webhook the bar's automations listen on.
 const WEBHOOK_URL = "https://services.leadconnectorhq.com/hooks/8nDL9BCU3hp9982tGYT1/webhook-trigger/71aa3d40-0ead-46d9-9255-2bbe7caa770d";
@@ -507,18 +520,26 @@ export const appRouter = router({
           }
           const placeholderPosition = variants[0].placeholders?.[0]?.position ?? "front";
 
-          const product = await printify.createProduct({
+          // Placeholder price on creation — Printify only tells us its real
+          // per-variant manufacturing cost in the response, so the actual
+          // price (cost + margin) gets set in a follow-up update below.
+          const created = await printify.createProduct({
             title: def.title,
             description: def.description,
             blueprintId: def.blueprintId,
             printProviderId: provider.id,
             imageId: uploaded.id,
-            variants: variants.map((v) => ({ id: v.id, price: 500, isEnabled: true })),
+            variants: variants.map((v) => ({ id: v.id, price: 100, isEnabled: true })),
             placeholderPosition,
           });
 
-          await setAdminSetting(`printify_product_${input.productKey}`, product.id);
-          return { productId: product.id };
+          const priced = await printify.updateProductVariantPrices(
+            created.id,
+            created.variants.map((v) => ({ id: v.id, price: v.cost + MARGIN_CENTS, isEnabled: v.is_enabled }))
+          );
+
+          await setAdminSetting(`printify_product_${input.productKey}`, priced.id);
+          return { productId: priced.id };
         }),
 
       // Fetches the live product (with Printify-generated mockup images) for
@@ -534,23 +555,35 @@ export const appRouter = router({
 
       // Places a REAL, paid print order through Printify — charges the
       // payment method on file. Only ever called by an explicit admin click.
+      // Destination-dependent, so only called once the admin has entered a
+      // delivery address — never speculatively. Read-only against Printify
+      // (no order is placed), so it's safe to call as often as needed.
+      getShippingCost: publicProcedure
+        .input(z.object({
+          productKey: z.string(),
+          variantId: z.number(),
+          quantity: z.number().int().min(1).max(1000),
+          addressTo: SHOP_ADDRESS_SCHEMA,
+        }))
+        .query(async ({ input, ctx }) => {
+          if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
+          const productId = await getAdminSetting(`printify_product_${input.productKey}`);
+          if (!productId) {
+            throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No product set up yet" });
+          }
+          return printify.getShippingCost({
+            lineItems: [{ productId, variantId: input.variantId, quantity: input.quantity }],
+            addressTo: input.addressTo,
+          });
+        }),
+
       orderProduct: publicProcedure
         .input(z.object({
           productKey: z.string(),
           variantId: z.number(),
           quantity: z.number().int().min(1).max(1000),
           shippingMethod: z.number().int().default(1),
-          addressTo: z.object({
-            firstName: z.string().min(1),
-            lastName: z.string().min(1),
-            email: z.string().email(),
-            phone: z.string().min(3),
-            country: z.string().min(2),
-            region: z.string().optional().default(""),
-            address1: z.string().min(1),
-            city: z.string().min(1),
-            zip: z.string().min(1),
-          }),
+          addressTo: SHOP_ADDRESS_SCHEMA,
         }))
         .mutation(async ({ input, ctx }) => {
           if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });

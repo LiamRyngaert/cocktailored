@@ -59,7 +59,9 @@ export type PrintifyProduct = {
   id: string;
   title: string;
   images: PrintifyProductImage[];
-  variants: Array<{ id: number; price: number; title: string; is_enabled: boolean }>;
+  // cost = Printify's manufacturing cost in cents (excl. shipping).
+  // price = what we set the variant to charge — cost + our margin.
+  variants: Array<{ id: number; price: number; cost: number; title: string; is_enabled: boolean }>;
 };
 
 export async function createProduct(params: {
@@ -96,6 +98,58 @@ export async function createProduct(params: {
 
 export async function getProduct(productId: string): Promise<PrintifyProduct> {
   return printifyFetch(`/shops/${ENV.printifyShopId}/products/${productId}.json`);
+}
+
+// Sets each variant's retail price directly (used right after creation, once
+// we know Printify's real per-variant manufacturing cost, to price it at
+// cost + our margin instead of a guessed flat price).
+export async function updateProductVariantPrices(
+  productId: string,
+  variants: Array<{ id: number; price: number; isEnabled: boolean }>
+): Promise<PrintifyProduct> {
+  return printifyFetch(`/shops/${ENV.printifyShopId}/products/${productId}.json`, {
+    method: "PUT",
+    body: JSON.stringify({
+      variants: variants.map((v) => ({ id: v.id, price: v.price, is_enabled: v.isEnabled })),
+    }),
+  });
+}
+
+export type PrintifyShippingCosts = {
+  standard?: number; express?: number; priority?: number;
+  printify_express?: number; economy?: number;
+};
+
+// Destination-dependent, so this is only ever called once the admin has
+// entered a delivery address in the order form — never speculatively.
+export async function getShippingCost(params: {
+  lineItems: Array<{ productId: string; variantId: number; quantity: number }>;
+  addressTo: {
+    firstName: string; lastName: string; email: string; phone: string;
+    country: string; region: string; address1: string; city: string; zip: string;
+  };
+}): Promise<PrintifyShippingCosts> {
+  return printifyFetch(`/shops/${ENV.printifyShopId}/orders/shipping.json`, {
+    method: "POST",
+    body: JSON.stringify({
+      line_items: params.lineItems.map((li) => ({
+        product_id: li.productId,
+        variant_id: li.variantId,
+        quantity: li.quantity,
+      })),
+      address_to: {
+        first_name: params.addressTo.firstName,
+        last_name: params.addressTo.lastName,
+        email: params.addressTo.email,
+        phone: params.addressTo.phone,
+        country: params.addressTo.country,
+        region: params.addressTo.region,
+        address1: params.addressTo.address1,
+        city: params.addressTo.city,
+        zip: params.addressTo.zip,
+      },
+    }),
+  });
 }
 
 // Places a real, paid print order — charges the payment method on file in

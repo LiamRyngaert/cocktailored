@@ -1074,6 +1074,8 @@ function BackendStatusCard() {
 // ── Shop tab ─────────────────────────────────────────────────────────────────
 
 const SHOP_ADDRESS_KEY = "bb_shop_address";
+// Matches server MARGIN_CENTS — display-only, the server is the source of truth for actual pricing.
+const MARGIN_EUR = 0.5;
 
 type ShopAddress = {
   firstName: string; lastName: string; email: string; phone: string;
@@ -1160,6 +1162,8 @@ function ProductCard({ productKey, label, emoji, productId }: {
   const [quantity, setQuantity] = useState(50);
   const [address, setAddress] = useState<ShopAddress>(() => loadShopAddress());
   const [showOrderForm, setShowOrderForm] = useState(false);
+  const [shippingCents, setShippingCents] = useState<number | null>(null);
+  const [checkingShipping, setCheckingShipping] = useState(false);
 
   const setupMutation = trpc.admin.shop.setupProduct.useMutation({
     onSuccess: () => { toast.success(`${label} aangemaakt in Printify!`); utils.admin.shop.status.invalidate(); refetchProduct(); },
@@ -1191,10 +1195,30 @@ function ProductCard({ productKey, label, emoji, productId }: {
     ? Math.min(...enabledVariants.map((v: { price: number }) => v.price)) / 100
     : null;
 
+  const activeVariant = enabledVariants.find((v: { id: number }) => v.id === activeVariantId);
+  const unitPrice = activeVariant ? activeVariant.price / 100 : null;
+  const totalCents = unitPrice !== null ? Math.round(unitPrice * 100) * quantity + (shippingCents ?? 0) : null;
+
+  const handleCheckShipping = async () => {
+    if (!activeVariantId) return;
+    setCheckingShipping(true);
+    setShippingCents(null);
+    try {
+      const result = await utils.client.admin.shop.getShippingCost.query({ productKey, variantId: activeVariantId, quantity, addressTo: address });
+      const cheapest = Math.min(...Object.values(result).filter((v): v is number => typeof v === "number"));
+      setShippingCents(Number.isFinite(cheapest) ? cheapest : null);
+    } catch {
+      toast.error("Kon verzendkosten niet berekenen — controleer het adres.");
+    } finally {
+      setCheckingShipping(false);
+    }
+  };
+
   const handleOrderSubmit = () => {
     if (!activeVariantId) return;
     localStorage.setItem(SHOP_ADDRESS_KEY, JSON.stringify(address));
-    if (!window.confirm(`Dit plaatst een ECHTE bestelling bij Printify voor ${quantity}x ${label} en belast jouw betaalmethode. Doorgaan?`)) return;
+    const totalLabel = totalCents !== null ? ` (totaal €${(totalCents / 100).toFixed(2)}${shippingCents === null ? " excl. verzending" : ""})` : "";
+    if (!window.confirm(`Dit plaatst een ECHTE bestelling bij Printify voor ${quantity}x ${label}${totalLabel} en belast jouw betaalmethode. Doorgaan?`)) return;
     orderMutation.mutate({ productKey, variantId: activeVariantId, quantity, addressTo: address });
   };
 
@@ -1230,18 +1254,23 @@ function ProductCard({ productKey, label, emoji, productId }: {
 
             {enabledVariants.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-3">
-                {enabledVariants.map((v: { id: number; title: string }) => (
-                  <button key={v.id} onClick={() => setSelectedVariantId(v.id)}
+                {enabledVariants.map((v: { id: number; title: string; price: number }) => (
+                  <button key={v.id} onClick={() => { setSelectedVariantId(v.id); setShippingCents(null); }}
                     className="rounded-md px-2 py-1 text-[11px] font-medium transition-all"
                     style={{
                       background: activeVariantId === v.id ? "rgba(255,107,53,0.15)" : "rgba(255,255,255,0.05)",
                       border: activeVariantId === v.id ? "1px solid rgba(255,107,53,0.35)" : "1px solid rgba(255,255,255,0.1)",
                       color: activeVariantId === v.id ? "#ff6b35" : "rgba(255,255,255,0.6)",
                     }}>
-                    {v.title}
+                    {v.title} · €{(v.price / 100).toFixed(2)}
                   </button>
                 ))}
               </div>
+            )}
+            {unitPrice !== null && (
+              <p className="text-white/40 text-[11px] mt-1.5">
+                €{unitPrice.toFixed(2)}/stuk × {quantity} = €{((unitPrice * quantity)).toFixed(2)} (incl. €{(MARGIN_EUR).toFixed(2)} marge per stuk, excl. verzending)
+              </p>
             )}
 
             {!showOrderForm ? (
@@ -1283,9 +1312,23 @@ function ProductCard({ productKey, label, emoji, productId }: {
                 <div className="grid grid-cols-2 gap-1.5 mb-2">
                   <input placeholder="Provincie/regio" value={address.region} onChange={(e) => setAddress({ ...address, region: e.target.value })}
                     className="rounded-md px-2.5 py-1.5 text-white placeholder-white/30 outline-none text-xs" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
-                  <input placeholder="Landcode (bv. ID, US)" value={address.country} onChange={(e) => setAddress({ ...address, country: e.target.value })}
+                  <input placeholder="Landcode (bv. ID, US)" value={address.country} onChange={(e) => { setAddress({ ...address, country: e.target.value }); setShippingCents(null); }}
                     className="rounded-md px-2.5 py-1.5 text-white placeholder-white/30 outline-none text-xs" style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
                 </div>
+
+                <button onClick={handleCheckShipping} disabled={checkingShipping}
+                  className="text-[11px] text-white/50 hover:text-white/80 underline transition-colors disabled:opacity-50 mb-2">
+                  {checkingShipping ? "Verzendkosten berekenen..." : "Bereken verzendkosten"}
+                </button>
+                {shippingCents !== null && (
+                  <p className="text-white/50 text-[11px] mb-2">Verzending: €{(shippingCents / 100).toFixed(2)}</p>
+                )}
+                {totalCents !== null && (
+                  <p className="text-white font-semibold text-xs mb-2">
+                    Totaal: €{(totalCents / 100).toFixed(2)}{shippingCents === null && <span className="text-white/40 font-normal"> (excl. verzending)</span>}
+                  </p>
+                )}
+
                 <div className="flex gap-2">
                   <button onClick={handleOrderSubmit} disabled={orderMutation.isPending}
                     className="rounded-md px-3 py-2 font-bold text-black text-xs disabled:opacity-50"
