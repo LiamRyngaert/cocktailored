@@ -1088,12 +1088,16 @@ function loadShopAddress(): ShopAddress {
   return { firstName: "", lastName: "", email: "", phone: "", country: "", region: "", address1: "", city: "", zip: "" };
 }
 
+// Same design as the downloadable card in QR Codes — QR + logo, wrapped in
+// the full branded card with the "ORDER YOUR PERSONALIZED COCKTAIL" header
+// and "Cocktailored" footer — not just the bare QR square.
 async function buildStickerPrintImage(): Promise<string> {
-  const size = 1000;
+  const size = 400;
   const styled = renderRoundedQR(QR_URL, size, 0);
   const logoImg = await loadImage("/brand/cocktail-logo.jpeg");
   drawCenterLogo(styled, logoImg);
-  return styled.toDataURL("image/png");
+  const card = buildCardCanvas(styled);
+  return card.toDataURL("image/png");
 }
 
 function ShopTab() {
