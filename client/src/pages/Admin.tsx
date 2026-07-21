@@ -1180,6 +1180,7 @@ function ProductCard({ productKey, label, emoji, productId }: {
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [shippingCents, setShippingCents] = useState<number | null>(null);
   const [checkingShipping, setCheckingShipping] = useState(false);
+  const [draftOnly, setDraftOnly] = useState(false);
 
   const setupMutation = trpc.admin.shop.setupProduct.useMutation({
     onSuccess: () => { toast.success(`${label} aangemaakt in Printify!`); utils.admin.shop.status.invalidate(); refetchProduct(); },
@@ -1188,7 +1189,12 @@ function ProductCard({ productKey, label, emoji, productId }: {
   });
 
   const orderMutation = trpc.admin.shop.orderProduct.useMutation({
-    onSuccess: () => { toast.success("Bestelling geplaatst bij Printify!"); setShowOrderForm(false); },
+    onSuccess: (result: { draft: boolean }) => {
+      toast.success(result.draft
+        ? "Testbestelling (concept) aangemaakt in Printify — niets betaald. Annuleer of verzend hem via het Printify dashboard."
+        : "Bestelling geplaatst bij Printify!");
+      setShowOrderForm(false);
+    },
     onError: (err: { message: string }) => toast.error(`Bestelling mislukt: ${err.message}`),
   });
 
@@ -1248,8 +1254,11 @@ function ProductCard({ productKey, label, emoji, productId }: {
     }
     localStorage.setItem(SHOP_ADDRESS_KEY, JSON.stringify(address));
     const totalLabel = totalCents !== null ? ` (totaal €${(totalCents / 100).toFixed(2)}${shippingCents === null ? " excl. verzending" : ""})` : "";
-    if (!window.confirm(`Dit plaatst een ECHTE bestelling bij Printify voor ${quantity}x ${label}${totalLabel} en belast jouw betaalmethode. Doorgaan?`)) return;
-    orderMutation.mutate({ productKey, variantId: activeVariantId, quantity, addressTo: address });
+    const confirmMsg = draftOnly
+      ? `Dit maakt een TESTBESTELLING (concept) aan in Printify voor ${quantity}x ${label}${totalLabel}. Er wordt niets betaald of geproduceerd. Doorgaan?`
+      : `Dit plaatst een ECHTE bestelling bij Printify voor ${quantity}x ${label}${totalLabel} en belast jouw betaalmethode. Doorgaan?`;
+    if (!window.confirm(confirmMsg)) return;
+    orderMutation.mutate({ productKey, variantId: activeVariantId, quantity, addressTo: address, draftOnly });
   };
 
   return (
@@ -1377,11 +1386,16 @@ function ProductCard({ productKey, label, emoji, productId }: {
                 {!addressComplete && (
                   <p className="text-amber-400 text-[11px] mb-2">Vul een volledig bezorgadres in om te kunnen bestellen.</p>
                 )}
+                <label className="flex items-center gap-2 cursor-pointer select-none mb-2">
+                  <input type="checkbox" checked={draftOnly} onChange={(e) => setDraftOnly(e.target.checked)}
+                    className="w-3.5 h-3.5 accent-amber-400" />
+                  <span className="text-amber-400/90 text-[11px]">Testmodus — alleen concept aanmaken, niets betalen of produceren</span>
+                </label>
                 <div className="flex gap-2">
                   <button onClick={handleOrderSubmit} disabled={orderMutation.isPending || !addressComplete}
                     className="rounded-md px-3 py-2 font-bold text-black text-xs disabled:opacity-50"
-                    style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)" }}>
-                    {orderMutation.isPending ? "Bezig..." : `Bevestig (${quantity}x)`}
+                    style={{ background: draftOnly ? "linear-gradient(135deg, #f59e0b, #f97316)" : "linear-gradient(135deg, #10b981, #22d3ee)" }}>
+                    {orderMutation.isPending ? "Bezig..." : draftOnly ? `Test (${quantity}x)` : `Bevestig (${quantity}x)`}
                   </button>
                   <button onClick={() => setShowOrderForm(false)} className="text-white/75 hover:text-white text-xs transition-colors px-2">
                     Annuleren

@@ -651,6 +651,11 @@ export const appRouter = router({
           quantity: z.number().int().min(1).max(1000),
           shippingMethod: z.number().int().default(1),
           addressTo: SHOP_ADDRESS_SCHEMA,
+          // Draft/test mode: create the order in Printify WITHOUT sending it
+          // to production — nothing is charged, nothing gets made. The draft
+          // sits in the Printify dashboard where it can be cancelled freely
+          // or submitted manually.
+          draftOnly: z.boolean().default(false),
         }))
         .mutation(async ({ input, ctx }) => {
           if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
@@ -663,9 +668,13 @@ export const appRouter = router({
             addressTo: input.addressTo,
             shippingMethod: input.shippingMethod,
           });
+          if (input.draftOnly) {
+            return { ...order, draft: true as const };
+          }
           // createOrder alone only creates a draft — this is the call that
           // actually charges the payment method on file and starts production.
-          return printify.sendOrderToProduction(order.id);
+          const produced = await printify.sendOrderToProduction(order.id);
+          return { ...produced, draft: false as const };
         }),
     }),
 
