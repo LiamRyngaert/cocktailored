@@ -405,7 +405,10 @@ export const appRouter = router({
           httpOnly: true,
           secure: isHttps,
           sameSite: "none",
-          maxAge: 60 * 60 * 24 * 7,
+          // Express cookie maxAge is in MILLISECONDS — the previous value
+          // (60*60*24*7 without *1000) expired the admin session after ~10
+          // minutes, logging the admin out constantly.
+          maxAge: 7 * 24 * 60 * 60 * 1000,
           path: "/",
         });
         return { success: true };
