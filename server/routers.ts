@@ -538,16 +538,30 @@ export const appRouter = router({
           // Placeholder price on creation — Printify only tells us its real
           // per-variant manufacturing cost in the response, so the actual
           // price (cost + margin) gets set in a follow-up update below.
-          const created = await printify.createProduct({
-            title: def.title,
-            description: def.description,
-            blueprintId: def.blueprintId,
-            printProviderId: provider.id,
-            imageId: uploaded.id,
-            variants: variants.map((v) => ({ id: v.id, price: 100, isEnabled: true })),
-            placeholderPosition,
-            imageScale,
-          });
+          // Printify's product-create endpoint intermittently returns opaque
+          // 500s for payloads that succeed on retry (confirmed by identical
+          // payloads succeeding minutes apart), so retry with backoff.
+          let created: Awaited<ReturnType<typeof printify.createProduct>> | undefined;
+          let lastCreateError: Error | undefined;
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+              created = await printify.createProduct({
+                title: def.title,
+                description: def.description,
+                blueprintId: def.blueprintId,
+                printProviderId: provider.id,
+                imageId: uploaded.id,
+                variants: variants.map((v) => ({ id: v.id, price: 100, isEnabled: true })),
+                placeholderPosition,
+                imageScale,
+              });
+              break;
+            } catch (err) {
+              lastCreateError = err as Error;
+              if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 2000));
+            }
+          }
+          if (!created) throw lastCreateError ?? new Error("Product creation failed");
 
           const priced = await printify.updateProductVariantPrices(
             created.id,
