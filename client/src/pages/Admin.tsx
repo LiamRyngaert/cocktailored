@@ -1173,7 +1173,7 @@ function ProductCard({ productKey, label, emoji, productId }: {
   );
   const [settingUp, setSettingUp] = useState(false);
   const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
-  const [quantity, setQuantity] = useState(50);
+  const [quantity, setQuantity] = useState(1);
   const [address, setAddress] = useState<ShopAddress>(() => loadShopAddress());
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [shippingCents, setShippingCents] = useState<number | null>(null);
@@ -1302,20 +1302,35 @@ function ProductCard({ productKey, label, emoji, productId }: {
             )}
 
             {!showOrderForm ? (
-              <div className="flex items-end gap-2 mt-3">
-                <div style={{ maxWidth: "90px" }}>
+              <>
+                <div className="mt-3">
                   <label className="block text-white/75 text-[10px] uppercase tracking-wider mb-1">Aantal</label>
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {[1, 5, 10, 25, 50, 100].map((q) => (
+                      <button key={q} onClick={() => setQuantity(q)}
+                        className="rounded-md px-2.5 py-1 text-[11px] font-medium transition-all"
+                        style={{
+                          background: quantity === q ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.05)",
+                          border: quantity === q ? "1px solid rgba(16,185,129,0.4)" : "1px solid rgba(255,255,255,0.1)",
+                          color: quantity === q ? "#10b981" : "rgba(255,255,255,0.75)",
+                        }}>
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex items-end gap-2">
                   <input type="number" min={1} max={1000} value={quantity}
                     onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="w-full rounded-md px-2.5 py-2 text-white outline-none text-sm"
-                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
+                    className="rounded-md px-2.5 py-2 text-white outline-none text-sm"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", maxWidth: "90px" }} />
+                  <button onClick={() => setShowOrderForm(true)} disabled={!activeVariantId}
+                    className="flex-1 rounded-md py-2.5 font-bold text-black text-xs disabled:opacity-50"
+                    style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)" }}>
+                    Bestellen →
+                  </button>
                 </div>
-                <button onClick={() => setShowOrderForm(true)} disabled={!activeVariantId}
-                  className="flex-1 rounded-md py-2.5 font-bold text-black text-xs disabled:opacity-50"
-                  style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)" }}>
-                  Bestellen →
-                </button>
-              </div>
+              </>
             ) : (
               <div className="mt-3 rounded-md p-3" style={{ background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.2)" }}>
                 <div className="text-white font-semibold text-xs mb-2">Bezorgadres</div>
