@@ -495,6 +495,14 @@ export const appRouter = router({
         return printify.getShops();
       }),
 
+      // Diagnostic: lists the shop's products (id + title), to spot the
+      // duplicate pile-up that design refreshes leave behind.
+      debugProducts: publicProcedure.query(async ({ ctx }) => {
+        if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
+        const result = await printify.listProducts();
+        return { total: result.total, products: result.data.map((p) => ({ id: p.id, title: p.title })) };
+      }),
+
       // One-time (or re-run to refresh the design) setup: uploads the given
       // artwork to Printify and creates a product for the given catalog
       // entry. Costs nothing — creating a catalog product isn't a purchase.
@@ -541,24 +549,38 @@ export const appRouter = router({
           // Printify's product-create endpoint intermittently returns opaque
           // 500s for payloads that succeed on retry (confirmed by identical
           // payloads succeeding minutes apart), so retry with backoff.
+          const oldProductId = await getAdminSetting(`printify_product_${input.productKey}`);
+          const attemptCreate = () => printify.createProduct({
+            title: def.title,
+            description: def.description,
+            blueprintId: def.blueprintId,
+            printProviderId: provider.id,
+            imageId: uploaded.id,
+            variants: variants.map((v) => ({ id: v.id, price: 100, isEnabled: true })),
+            placeholderPosition,
+            imageScale,
+          });
+
           let created: Awaited<ReturnType<typeof printify.createProduct>> | undefined;
           let lastCreateError: Error | undefined;
           for (let attempt = 1; attempt <= 3; attempt++) {
             try {
-              created = await printify.createProduct({
-                title: def.title,
-                description: def.description,
-                blueprintId: def.blueprintId,
-                printProviderId: provider.id,
-                imageId: uploaded.id,
-                variants: variants.map((v) => ({ id: v.id, price: 100, isEnabled: true })),
-                placeholderPosition,
-                imageScale,
-              });
+              created = await attemptCreate();
               break;
             } catch (err) {
               lastCreateError = err as Error;
               if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 2000));
+            }
+          }
+          // Last resort: the failure may be shop-state related (e.g. the pile
+          // of superseded duplicates hitting a limit) — delete the product
+          // this refresh replaces and try once more.
+          if (!created && oldProductId) {
+            try {
+              await printify.deleteProduct(oldProductId);
+              created = await attemptCreate();
+            } catch (err) {
+              lastCreateError = err as Error;
             }
           }
           if (!created) throw lastCreateError ?? new Error("Product creation failed");
@@ -569,6 +591,12 @@ export const appRouter = router({
           );
 
           await setAdminSetting(`printify_product_${input.productKey}`, priced.id);
+          // Clean up the superseded product so refreshes don't pile up
+          // duplicates in the Printify shop. Best-effort: a failure here
+          // must not fail the refresh itself.
+          if (oldProductId && oldProductId !== priced.id) {
+            try { await printify.deleteProduct(oldProductId); } catch { /* already gone or delete-blocked */ }
+          }
           return { productId: priced.id };
         }),
 

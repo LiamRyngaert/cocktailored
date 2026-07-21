@@ -109,6 +109,17 @@ export async function getProduct(productId: string): Promise<PrintifyProduct> {
   return printifyFetch(`/shops/${ENV.printifyShopId}/products/${productId}.json`);
 }
 
+export async function listProducts(): Promise<{ data: Array<{ id: string; title: string; created_at?: string }>; total?: number }> {
+  return printifyFetch(`/shops/${ENV.printifyShopId}/products.json?limit=50`);
+}
+
+// Removes a product from the shop catalog. Deleting a catalog product is not
+// destructive to any order — orders keep their own copy — and is only used to
+// clean up the superseded duplicate left behind by a design refresh.
+export async function deleteProduct(productId: string): Promise<void> {
+  await printifyFetch(`/shops/${ENV.printifyShopId}/products/${productId}.json`, { method: "DELETE" });
+}
+
 // Sets each variant's retail price directly (used right after creation, once
 // we know Printify's real per-variant manufacturing cost, to price it at
 // cost + our margin instead of a guessed flat price).
