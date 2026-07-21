@@ -546,57 +546,55 @@ export const appRouter = router({
           // Placeholder price on creation — Printify only tells us its real
           // per-variant manufacturing cost in the response, so the actual
           // price (cost + margin) gets set in a follow-up update below.
-          // Printify's product-create endpoint intermittently returns opaque
-          // 500s for payloads that succeed on retry (confirmed by identical
-          // payloads succeeding minutes apart), so retry with backoff.
           const oldProductId = await getAdminSetting(`printify_product_${input.productKey}`);
-          const attemptCreate = () => printify.createProduct({
-            title: def.title,
-            description: def.description,
-            blueprintId: def.blueprintId,
-            printProviderId: provider.id,
-            imageId: uploaded.id,
-            variants: variants.map((v) => ({ id: v.id, price: 100, isEnabled: true })),
-            placeholderPosition,
-            imageScale,
-          });
-
-          let created: Awaited<ReturnType<typeof printify.createProduct>> | undefined;
-          let lastCreateError: Error | undefined;
-          for (let attempt = 1; attempt <= 3; attempt++) {
-            try {
-              created = await attemptCreate();
-              break;
-            } catch (err) {
-              lastCreateError = err as Error;
-              if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 2000));
-            }
+          let createdId: string;
+          try {
+            const created = await printify.createProduct({
+              title: def.title,
+              description: def.description,
+              blueprintId: def.blueprintId,
+              printProviderId: provider.id,
+              imageId: uploaded.id,
+              variants: variants.map((v) => ({ id: v.id, price: 100, isEnabled: true })),
+              placeholderPosition,
+              imageScale,
+            });
+            createdId = created.id;
+          } catch (err) {
+            // Printify's create endpoint regularly answers 500 AFTER having
+            // actually created the product (verified: every "failed" attempt
+            // left a real product in the shop). Blind retries multiply
+            // duplicates — instead, look for the orphan this call just
+            // created and adopt it. Only give up if there's truly nothing.
+            await new Promise((r) => setTimeout(r, 3000));
+            const all = await printify.listProducts();
+            const orphan = all.data.find((p) => p.title === def.title && p.id !== oldProductId);
+            if (!orphan) throw err;
+            logInfo("printify", "adopted orphan product after create 500", { productId: orphan.id });
+            createdId = orphan.id;
           }
-          // Last resort: the failure may be shop-state related (e.g. the pile
-          // of superseded duplicates hitting a limit) — delete the product
-          // this refresh replaces and try once more.
-          if (!created && oldProductId) {
-            try {
-              await printify.deleteProduct(oldProductId);
-              created = await attemptCreate();
-            } catch (err) {
-              lastCreateError = err as Error;
-            }
-          }
-          if (!created) throw lastCreateError ?? new Error("Product creation failed");
 
+          const fresh = await printify.getProduct(createdId);
           const priced = await printify.updateProductVariantPrices(
-            created.id,
-            created.variants.map((v) => ({ id: v.id, price: v.cost + MARGIN_CENTS, isEnabled: v.is_enabled }))
+            fresh.id,
+            fresh.variants.map((v) => ({ id: v.id, price: v.cost + MARGIN_CENTS, isEnabled: v.is_enabled }))
           );
 
           await setAdminSetting(`printify_product_${input.productKey}`, priced.id);
-          // Clean up the superseded product so refreshes don't pile up
-          // duplicates in the Printify shop. Best-effort: a failure here
-          // must not fail the refresh itself.
-          if (oldProductId && oldProductId !== priced.id) {
-            try { await printify.deleteProduct(oldProductId); } catch { /* already gone or delete-blocked */ }
-          }
+
+          // Converge to exactly one product per catalog entry: delete every
+          // other same-title product (duplicates from earlier 500-adoptions)
+          // plus the superseded old product even if it had a different title
+          // (e.g. after a rename). Best-effort — cleanup failure must not
+          // fail the refresh.
+          try {
+            const all = await printify.listProducts();
+            for (const p of all.data) {
+              if (p.id !== priced.id && (p.title === def.title || p.id === oldProductId)) {
+                try { await printify.deleteProduct(p.id); } catch { /* already gone */ }
+              }
+            }
+          } catch { /* listing failed — leave cleanup for next refresh */ }
           return { productId: priced.id };
         }),
 
