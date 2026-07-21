@@ -176,11 +176,14 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-function buildCardCanvas(qrCanvas: HTMLCanvasElement, outerRadius = 56): HTMLCanvasElement {
+function buildCardCanvas(qrCanvas: HTMLCanvasElement, outerRadius = 56, vPad = 0): HTMLCanvasElement {
   // QR 620 (not 640) so the brand footer can sit higher: the header's ink
   // starts ~46px from the top, and the footer's ink now ends ~46px from the
-  // bottom — equal top/bottom margins.
-  const SIZE = 900, QR = 620;
+  // bottom — equal top/bottom margins. vPad adds extra symmetric breathing
+  // room for products whose die-cut/print edge sits tight on the design
+  // (sticker rolls, coasters): header moves down, footer moves up, and the
+  // QR shrinks to keep everything clear.
+  const SIZE = 900, QR = 620 - vPad * 2;
   const off = document.createElement("canvas");
   off.width = SIZE; off.height = SIZE;
   const ctx = off.getContext("2d")!;
@@ -205,7 +208,7 @@ function buildCardCanvas(qrCanvas: HTMLCanvasElement, outerRadius = 56): HTMLCan
   const sG = ctx.createLinearGradient((SIZE - sW1) / 2, 0, (SIZE - sW1) / 2 + sW1, 0);
   sG.addColorStop(0, "#ff9a00"); sG.addColorStop(0.5, "#ff3cac"); sG.addColorStop(1, "#9b59b6");
   ctx.fillStyle = sG;
-  drawTextSpaced(ctx, slLine1, (SIZE - sW1) / 2, 64, SSP);
+  drawTextSpaced(ctx, slLine1, (SIZE - sW1) / 2, 64 + vPad, SSP);
   // Line 2: "PERSONALIZED" white (matches the "Cocktail" brand styling) and
   // slightly bigger, "COCKTAIL" keeps the gradient.
   ctx.font = "700 39px system-ui, sans-serif";
@@ -215,11 +218,11 @@ function buildCardCanvas(qrCanvas: HTMLCanvasElement, outerRadius = 56): HTMLCan
   const w2W = measureTextSpaced(ctx, word2, SSP);
   const line2StartX = (SIZE - (w1W + w2W)) / 2;
   ctx.fillStyle = "#ffffff";
-  drawTextSpaced(ctx, word1, line2StartX, 106, SSP);
+  drawTextSpaced(ctx, word1, line2StartX, 106 + vPad, SSP);
   const sG2 = ctx.createLinearGradient(line2StartX + w1W, 0, line2StartX + w1W + w2W, 0);
   sG2.addColorStop(0, "#ff9a00"); sG2.addColorStop(0.5, "#ff3cac"); sG2.addColorStop(1, "#9b59b6");
   ctx.fillStyle = sG2;
-  drawTextSpaced(ctx, word2, line2StartX + w1W, 106, SSP);
+  drawTextSpaced(ctx, word2, line2StartX + w1W, 106 + vPad, SSP);
   const qrBox = document.createElement("canvas");
   qrBox.width = QR; qrBox.height = QR;
   const qc = qrBox.getContext("2d")!;
@@ -245,11 +248,11 @@ function buildCardCanvas(qrCanvas: HTMLCanvasElement, outerRadius = 56): HTMLCan
   const oW = measureTextSpaced(ctx, "ored", SP);
   const sx = (SIZE - cW - oW) / 2;
   ctx.fillStyle = "#ffffff";
-  drawTextSpaced(ctx, "Cocktail", sx, SIZE - 84, SP);
+  drawTextSpaced(ctx, "Cocktail", sx, SIZE - 84 - vPad, SP);
   const gT = ctx.createLinearGradient(sx + cW, 0, sx + cW + oW, 0);
   gT.addColorStop(0, "#ff3cac"); gT.addColorStop(1, "#9b59b6");
   ctx.fillStyle = gT;
-  drawTextSpaced(ctx, "ored", sx + cW, SIZE - 84, SP);
+  drawTextSpaced(ctx, "ored", sx + cW, SIZE - 84 - vPad, SP);
   ctx.restore();
   return off;
 }
@@ -1103,12 +1106,20 @@ function loadShopAddress(): ShopAddress {
 // full card ("ORDER YOUR PERSONALIZED COCKTAIL" header, Cocktailored
 // footer) with square corners so each print provider's own die-cut/print
 // area defines the shape, not a pre-baked rounded PNG.
-async function buildProductArtwork(): Promise<string> {
+// Extra symmetric top/bottom padding per product. Sticker rolls and coasters
+// cut/print right up to the design's edge, so their artwork needs more
+// breathing room around the header and footer text.
+const PRODUCT_ARTWORK_VPAD: Record<string, number> = {
+  sticker_roll: 60,
+  coaster: 60,
+};
+
+async function buildProductArtwork(productKey: string): Promise<string> {
   const size = 400;
   const styled = renderRoundedQR(QR_URL, size, 0);
   const logoImg = await loadImage("/brand/cocktail-logo.jpeg");
   drawCenterLogo(styled, logoImg);
-  const card = buildCardCanvas(styled, 0);
+  const card = buildCardCanvas(styled, 0, PRODUCT_ARTWORK_VPAD[productKey] ?? 0);
   return card.toDataURL("image/png");
 }
 
@@ -1182,7 +1193,7 @@ function ProductCard({ productKey, label, emoji, productId }: {
   const handleSetup = async () => {
     setSettingUp(true);
     try {
-      const imageBase64 = await buildProductArtwork();
+      const imageBase64 = await buildProductArtwork(productKey);
       setupMutation.mutate({ productKey, imageBase64 });
     } catch {
       toast.error("Kon de afbeelding niet genereren.");
