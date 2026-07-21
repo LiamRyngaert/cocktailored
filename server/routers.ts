@@ -503,6 +503,17 @@ export const appRouter = router({
         return { total: result.total, products: result.data.map((p) => ({ id: p.id, title: p.title })) };
       }),
 
+      // Removes a single catalog product (e.g. an orphan left behind after a
+      // product was renamed, which title-based cleanup can no longer match).
+      // Catalog-only: existing orders keep their own copy.
+      deleteProduct: publicProcedure
+        .input(z.object({ productId: z.string().min(8) }))
+        .mutation(async ({ input, ctx }) => {
+          if (!isAdminSession(ctx)) throw new TRPCError({ code: "UNAUTHORIZED" });
+          await printify.deleteProduct(input.productId);
+          return { success: true };
+        }),
+
       // One-time (or re-run to refresh the design) setup: uploads the given
       // artwork to Printify and creates a product for the given catalog
       // entry. Costs nothing — creating a catalog product isn't a purchase.
