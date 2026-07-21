@@ -1247,12 +1247,12 @@ function ProductCard({ productKey, label, emoji, productId }: {
             <span className="text-base">{emoji}</span>
             <div className="text-white font-semibold text-sm">{label}</div>
           </div>
-          {startPrice !== null && <div className="text-white/40 text-xs">v.a. €{startPrice.toFixed(2)}</div>}
+          {startPrice !== null && <div className="text-white/75 text-xs">v.a. €{startPrice.toFixed(2)}</div>}
         </div>
 
         {!productId ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center py-8">
-            <p className="text-white/40 text-xs mb-3">Nog niet opgezet in Printify.</p>
+            <p className="text-white/75 text-xs mb-3">Nog niet opgezet in Printify.</p>
             <button onClick={handleSetup} disabled={settingUp}
               className="rounded-md px-4 py-2 font-bold text-black text-xs disabled:opacity-50"
               style={{ background: "linear-gradient(135deg, #ff6b35, #f59e0b)" }}>
@@ -1263,9 +1263,9 @@ function ProductCard({ productKey, label, emoji, productId }: {
           <>
             {mockups.length > 0
               ? <ImageCarousel images={mockups} />
-              : <p className="text-white/40 text-xs py-8 text-center">Previews laden...</p>}
+              : <p className="text-white/75 text-xs py-8 text-center">Previews laden...</p>}
             <button onClick={handleSetup} disabled={settingUp}
-              className="text-[11px] text-white/40 hover:text-white/70 underline transition-colors mt-2 self-start">
+              className="text-[11px] text-white/75 hover:text-white underline transition-colors mt-2 self-start">
               {settingUp ? "Bezig..." : "Ontwerp vernieuwen"}
             </button>
 
@@ -1277,7 +1277,7 @@ function ProductCard({ productKey, label, emoji, productId }: {
                     style={{
                       background: activeVariantId === v.id ? "rgba(255,107,53,0.15)" : "rgba(255,255,255,0.05)",
                       border: activeVariantId === v.id ? "1px solid rgba(255,107,53,0.35)" : "1px solid rgba(255,255,255,0.1)",
-                      color: activeVariantId === v.id ? "#ff6b35" : "rgba(255,255,255,0.6)",
+                      color: activeVariantId === v.id ? "#ff6b35" : "rgba(255,255,255,0.85)",
                     }}>
                     {v.title} · €{(v.price / 100).toFixed(2)}
                   </button>
@@ -1285,7 +1285,7 @@ function ProductCard({ productKey, label, emoji, productId }: {
               </div>
             )}
             {unitPrice !== null && (
-              <p className="text-white/40 text-[11px] mt-1.5">
+              <p className="text-white/75 text-[11px] mt-1.5">
                 €{unitPrice.toFixed(2)}/stuk × {quantity} = €{((unitPrice * quantity)).toFixed(2)} (incl. €{(MARGIN_EUR).toFixed(2)} marge per stuk, excl. verzending)
               </p>
             )}
@@ -1293,7 +1293,7 @@ function ProductCard({ productKey, label, emoji, productId }: {
             {!showOrderForm ? (
               <div className="flex items-end gap-2 mt-3">
                 <div style={{ maxWidth: "90px" }}>
-                  <label className="block text-white/40 text-[10px] uppercase tracking-wider mb-1">Aantal</label>
+                  <label className="block text-white/75 text-[10px] uppercase tracking-wider mb-1">Aantal</label>
                   <input type="number" min={1} max={1000} value={quantity}
                     onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
                     className="w-full rounded-md px-2.5 py-2 text-white outline-none text-sm"
@@ -1334,15 +1334,15 @@ function ProductCard({ productKey, label, emoji, productId }: {
                 </div>
 
                 <button onClick={handleCheckShipping} disabled={checkingShipping}
-                  className="text-[11px] text-white/50 hover:text-white/80 underline transition-colors disabled:opacity-50 mb-2">
+                  className="text-[11px] text-white/75 hover:text-white underline transition-colors disabled:opacity-50 mb-2">
                   {checkingShipping ? "Verzendkosten berekenen..." : "Bereken verzendkosten"}
                 </button>
                 {shippingCents !== null && (
-                  <p className="text-white/50 text-[11px] mb-2">Verzending: €{(shippingCents / 100).toFixed(2)}</p>
+                  <p className="text-white/75 text-[11px] mb-2">Verzending: €{(shippingCents / 100).toFixed(2)}</p>
                 )}
                 {totalCents !== null && (
                   <p className="text-white font-semibold text-xs mb-2">
-                    Totaal: €{(totalCents / 100).toFixed(2)}{shippingCents === null && <span className="text-white/40 font-normal"> (excl. verzending)</span>}
+                    Totaal: €{(totalCents / 100).toFixed(2)}{shippingCents === null && <span className="text-white/75 font-normal"> (excl. verzending)</span>}
                   </p>
                 )}
 
@@ -1355,7 +1355,7 @@ function ProductCard({ productKey, label, emoji, productId }: {
                     style={{ background: "linear-gradient(135deg, #10b981, #22d3ee)" }}>
                     {orderMutation.isPending ? "Bezig..." : `Bevestig (${quantity}x)`}
                   </button>
-                  <button onClick={() => setShowOrderForm(false)} className="text-white/40 hover:text-white/70 text-xs transition-colors px-2">
+                  <button onClick={() => setShowOrderForm(false)} className="text-white/75 hover:text-white text-xs transition-colors px-2">
                     Annuleren
                   </button>
                 </div>
