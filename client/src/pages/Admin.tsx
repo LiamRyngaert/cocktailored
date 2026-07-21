@@ -1173,7 +1173,9 @@ function ProductCard({ productKey, label, emoji, productId }: {
   );
   const [settingUp, setSettingUp] = useState(false);
   const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
-  const [quantity, setQuantity] = useState(1);
+  // A roll already contains 50-250 stickers, so it defaults to 1; everything
+  // else defaults to a small batch of 5.
+  const [quantity, setQuantity] = useState(productKey === "sticker_roll" ? 1 : 5);
   const [address, setAddress] = useState<ShopAddress>(() => loadShopAddress());
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [shippingCents, setShippingCents] = useState<number | null>(null);
