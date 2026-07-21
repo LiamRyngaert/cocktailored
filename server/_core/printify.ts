@@ -17,7 +17,11 @@ async function printifyFetch<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    logError("printify", "API request failed", { path, status: res.status, body: body.slice(0, 500) });
+    // Log the request payload too (truncated) — Printify's 500s carry no
+    // detail, so the payload is the only way to diagnose what it rejects.
+    // Image uploads are excluded: their payload is megabytes of base64.
+    const sentBody = typeof init?.body === "string" && !path.includes("/uploads/") ? init.body.slice(0, 1500) : undefined;
+    logError("printify", "API request failed", { path, status: res.status, body: body.slice(0, 500), sentBody });
     throw new Error(`Printify API error ${res.status}: ${body.slice(0, 300)}`);
   }
   return res.json() as Promise<T>;
