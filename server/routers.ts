@@ -52,10 +52,10 @@ const SHOP_PRODUCTS: Record<string, {
     preferredProvider: "Printed Simply",
   },
   beer_mug: {
-    blueprintId: 1131,
-    title: "Cocktailored Bierpul",
-    description: "Beslagen bierpul met het Cocktailored QR-ontwerp.",
-    preferredProvider: "Imagine Your Photos",
+    blueprintId: 633,
+    title: "Cocktailored Bierglas",
+    description: "Glazen bierglas (pint, 16oz) met het Cocktailored QR-ontwerp.",
+    preferredProvider: "Chill",
   },
   coaster: {
     blueprintId: 480,

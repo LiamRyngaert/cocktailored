@@ -177,7 +177,10 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 }
 
 function buildCardCanvas(qrCanvas: HTMLCanvasElement, outerRadius = 56): HTMLCanvasElement {
-  const SIZE = 900, QR = 640;
+  // QR 620 (not 640) so the brand footer can sit higher: the header's ink
+  // starts ~46px from the top, and the footer's ink now ends ~46px from the
+  // bottom — equal top/bottom margins.
+  const SIZE = 900, QR = 620;
   const off = document.createElement("canvas");
   off.width = SIZE; off.height = SIZE;
   const ctx = off.getContext("2d")!;
@@ -234,7 +237,7 @@ function buildCardCanvas(qrCanvas: HTMLCanvasElement, outerRadius = 56): HTMLCan
   qc.save(); roundedPath(qc, QR, QR, ir); qc.clip();
   qc.drawImage(qrCanvas, pw, pw, QR - pw * 2, QR - pw * 2);
   qc.restore();
-  ctx.drawImage(qrBox, (SIZE - QR) / 2, (SIZE - QR) / 2 + 22);
+  ctx.drawImage(qrBox, (SIZE - QR) / 2, (SIZE - QR) / 2 + 10);
   // Brand name now sits BELOW the QR code.
   ctx.font = "800 76px system-ui, sans-serif";
   const SP = 2;
@@ -242,11 +245,11 @@ function buildCardCanvas(qrCanvas: HTMLCanvasElement, outerRadius = 56): HTMLCan
   const oW = measureTextSpaced(ctx, "ored", SP);
   const sx = (SIZE - cW - oW) / 2;
   ctx.fillStyle = "#ffffff";
-  drawTextSpaced(ctx, "Cocktail", sx, SIZE - 52, SP);
+  drawTextSpaced(ctx, "Cocktail", sx, SIZE - 84, SP);
   const gT = ctx.createLinearGradient(sx + cW, 0, sx + cW + oW, 0);
   gT.addColorStop(0, "#ff3cac"); gT.addColorStop(1, "#9b59b6");
   ctx.fillStyle = gT;
-  drawTextSpaced(ctx, "ored", sx + cW, SIZE - 52, SP);
+  drawTextSpaced(ctx, "ored", sx + cW, SIZE - 84, SP);
   ctx.restore();
   return off;
 }
@@ -1112,7 +1115,7 @@ async function buildProductArtwork(): Promise<string> {
 const SHOP_PRODUCT_DEFS: Array<{ key: string; label: string; emoji: string }> = [
   { key: "sticker", label: "QR Sticker", emoji: "🏷️" },
   { key: "sticker_roll", label: "Stickerrol", emoji: "🧻" },
-  { key: "beer_mug", label: "Bierpul", emoji: "🍺" },
+  { key: "beer_mug", label: "Bierglas", emoji: "🍺" },
   { key: "coaster", label: "Onderzetter", emoji: "🥌" },
 ];
 
