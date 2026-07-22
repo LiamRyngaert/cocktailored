@@ -45,14 +45,14 @@ const SHOP_PRODUCTS: Record<string, {
   bleedScale?: number;
 }> = {
   sticker: {
-    // "Square Stickers" (blueprint 384, SPOKE Custom Products): square
-    // stickers cut with rounded corners — replaces the sharp-cornered
-    // Square Vinyl blueprint 476.
-    blueprintId: 384,
+    // Die-Cut Stickers (blueprint 600): the cut follows the artwork's own
+    // shape, so the rounded-corner card PNG (transparent outside the
+    // radius) yields a rounded sticker printed edge-to-edge — unlike the
+    // SPOKE Square Stickers (384), which force a printed white border.
+    blueprintId: 600,
     title: "Cocktailored QR Sticker",
     description: "Gepersonaliseerde QR-sticker (afgeronde hoeken) die naar de Cocktailored cocktailquiz linkt.",
-    preferredProvider: "SPOKE Custom Products",
-    bleedScale: 1.08,
+    preferredProvider: "Printed Simply",
   },
   sticker_roll: {
     blueprintId: 1387,

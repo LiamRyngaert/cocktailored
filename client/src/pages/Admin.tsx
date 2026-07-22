@@ -1085,11 +1085,17 @@ function loadShopAddress(): ShopAddress {
 // cut/print right up to the design's edge, so their artwork needs more
 // breathing room around the header and footer text.
 const PRODUCT_ARTWORK_VPAD: Record<string, number> = {
-  // The sticker prints with bleed (server bleedScale 1.08 crops ~3.7% per
-  // side past the cut line), so its content needs extra clearance too.
-  sticker: 40,
   sticker_roll: 60,
   coaster: 60,
+};
+
+// Outer corner radius per product (design-space px on the 900×900 card).
+// The die-cut sticker's cut follows the artwork shape, so rounding the
+// artwork corners (transparent outside) is what makes the physical sticker
+// rounded. Other products keep square artwork and let the product's own
+// cut/print area define the shape.
+const PRODUCT_ARTWORK_RADIUS: Record<string, number> = {
+  sticker: 56,
 };
 
 async function buildProductArtwork(productKey: string): Promise<string> {
@@ -1100,7 +1106,7 @@ async function buildProductArtwork(productKey: string): Promise<string> {
   const styled = renderRoundedQR(QR_URL, 1800, 0);
   const logoImg = await loadImage("/brand/cocktail-logo.jpeg");
   drawCenterLogo(styled, logoImg);
-  const card = buildCardCanvas(styled, 0, PRODUCT_ARTWORK_VPAD[productKey] ?? 0, PRINT_SCALE);
+  const card = buildCardCanvas(styled, PRODUCT_ARTWORK_RADIUS[productKey] ?? 0, PRODUCT_ARTWORK_VPAD[productKey] ?? 0, PRINT_SCALE);
   return card.toDataURL("image/png");
 }
 
