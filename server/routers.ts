@@ -38,6 +38,11 @@ const MARGIN_CENTS = 50;
 // with no preview images).
 const SHOP_PRODUCTS: Record<string, {
   blueprintId: number; title: string; description: string; preferredProvider: string;
+  // Multiplier on top of the contain-fit scale. >1 makes the artwork bleed
+  // past the cut line so the product prints edge-to-edge instead of showing
+  // a white margin (pair with extra vPad in the artwork so no content sits
+  // in the cropped bleed zone).
+  bleedScale?: number;
 }> = {
   sticker: {
     // "Square Stickers" (blueprint 384, SPOKE Custom Products): square
@@ -47,6 +52,7 @@ const SHOP_PRODUCTS: Record<string, {
     title: "Cocktailored QR Sticker",
     description: "Gepersonaliseerde QR-sticker (afgeronde hoeken) die naar de Cocktailored cocktailquiz linkt.",
     preferredProvider: "SPOKE Custom Products",
+    bleedScale: 1.08,
   },
   sticker_roll: {
     blueprintId: 1387,
@@ -556,6 +562,9 @@ export const appRouter = router({
           if (placeholder && placeholder.width > 0 && placeholder.height > 0) {
             imageScale = Math.min(1, placeholder.height / placeholder.width);
           }
+          // Bleed: oversize slightly past the cut line where the product
+          // would otherwise print with a white edge.
+          imageScale *= def.bleedScale ?? 1;
 
           // Placeholder price on creation — Printify only tells us its real
           // per-variant manufacturing cost in the response, so the actual

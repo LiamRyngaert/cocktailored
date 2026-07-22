@@ -1085,6 +1085,9 @@ function loadShopAddress(): ShopAddress {
 // cut/print right up to the design's edge, so their artwork needs more
 // breathing room around the header and footer text.
 const PRODUCT_ARTWORK_VPAD: Record<string, number> = {
+  // The sticker prints with bleed (server bleedScale 1.08 crops ~3.7% per
+  // side past the cut line), so its content needs extra clearance too.
+  sticker: 40,
   sticker_roll: 60,
   coaster: 60,
 };
