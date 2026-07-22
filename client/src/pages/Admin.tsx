@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import QRCodeLib from "qrcode";
@@ -326,6 +326,25 @@ function IngredientToggle({ available, onChange }: { available: boolean; onChang
   );
 }
 
+// ── Shared tab loader ────────────────────────────────────────────────────────
+// Full-tab loading state shown until a tab's data has actually arrived, so
+// content doesn't pop in piecemeal.
+
+function TabLoader() {
+  return (
+    <div className="flex flex-col items-center justify-center py-24">
+      <div className="text-5xl mb-4 float-anim">🍹</div>
+      <div className="flex gap-2">
+        {["#ff6b35", "#a855f7", "#22d3ee"].map((c, i) => (
+          <div key={i} className="w-2.5 h-2.5 rounded-full animate-bounce"
+            style={{ background: c, animationDelay: `${i * 0.15}s` }} />
+        ))}
+      </div>
+      <p className="text-white/40 text-sm mt-4">Laden...</p>
+    </div>
+  );
+}
+
 // ── Ingredients tab ──────────────────────────────────────────────────────────
 
 function IngredientsTab() {
@@ -336,7 +355,7 @@ function IngredientsTab() {
   const [showAddForm, setShowAddForm] = useState(false);
 
   const utils = trpc.useUtils();
-  const { data: ingredients, refetch } = trpc.admin.getIngredients.useQuery();
+  const { data: ingredients, isLoading: ingredientsLoading, refetch } = trpc.admin.getIngredients.useQuery();
 
   // Optimistic toggle: flip the switch instantly, roll back + warn on failure,
   // and reconcile with the server afterwards. Prevents the switch from silently
@@ -384,6 +403,8 @@ function IngredientsTab() {
     if (other.length > 0) groups["other"] = [...(groups["other"] ?? []), ...other];
     return groups;
   }, [filtered, activeCat]);
+
+  if (ingredientsLoading) return <TabLoader />;
 
   return (
     <div className="flex flex-col gap-5">
@@ -534,7 +555,7 @@ function getTableNumber(session: { answers: unknown }): string | undefined {
 }
 
 function OrdersTab() {
-  const { data: sessions } = trpc.admin.getSessions.useQuery();
+  const { data: sessions, isLoading: sessionsLoading } = trpc.admin.getSessions.useQuery();
   const [servedMap, setServedMap] = useState<Map<number, number>>(() => loadServedMap());
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
@@ -591,6 +612,8 @@ function OrdersTab() {
   );
 
   const selectedSession = sessions?.find((s) => s.id === selectedId);
+
+  if (sessionsLoading) return <TabLoader />;
 
   if (showTrash) {
     return (
@@ -971,10 +994,7 @@ function QRCodesTab() {
   return (
     <div className="flex flex-col gap-4">
       {loading ? (
-        <div className="flex flex-col items-center py-12 gap-3">
-          <span className="inline-block w-8 h-8 border-2 border-white/10 border-t-white/60 rounded-full animate-spin" />
-          <p className="text-white/40 text-sm">QR kaartje wordt aangemaakt...</p>
-        </div>
+        <TabLoader />
       ) : cardDataUrl ? (
         <div className="flex flex-col items-center">
           <img src={cardDataUrl} alt="Cocktailored QR kaartje" className="w-full max-w-xs rounded-xl mb-2" />
@@ -1142,9 +1162,9 @@ const SHOP_PRODUCT_DEFS: Array<{ key: string; label: string; emoji: string }> = 
 // A product-page-style image carousel — one photo at a time, prev/next
 // arrows, dot indicators — the way a real webshop shows product photos
 // instead of a flat grid of thumbnails.
-// Printify's mockup CDN accepts an `s=` size hint (verified: s=320 returns a
-// 400px file instead of the full 1200px) — request appropriately-sized files
-// so the grid doesn't download megabytes of full-res mockups.
+// Printify's mockup CDN accepts an `s=` size hint. Verified tiers: 100, 200
+// and 400 are served exactly; anything larger falls back to the full
+// 1200px original. Main image uses 400, thumbnails 100.
 function sizedMockup(src: string, s: number): string {
   return src + (src.includes("?") ? "&" : "?") + "s=" + s;
 }
@@ -1156,7 +1176,7 @@ function ImageCarousel({ images }: { images: Array<{ src: string }> }) {
   return (
     <div>
       <div className="relative">
-        <img src={sizedMockup(images[i].src, 800)} alt="" loading="lazy" decoding="async"
+        <img src={sizedMockup(images[i].src, 400)} alt="" loading="lazy" decoding="async"
           className="w-full aspect-square object-cover rounded-md"
           style={{ background: "#fff", border: "1px solid rgba(255,255,255,0.1)" }} />
         {images.length > 1 && (
@@ -1175,7 +1195,7 @@ function ImageCarousel({ images }: { images: Array<{ src: string }> }) {
           {images.map((img, tIdx) => (
             <button key={tIdx} onClick={() => setIdx(tIdx)} className="flex-shrink-0 rounded transition-all"
               style={{ border: tIdx === i ? "2px solid #ff6b35" : "2px solid rgba(255,255,255,0.12)", padding: 0, lineHeight: 0 }}>
-              <img src={sizedMockup(img.src, 320)} alt="" loading="lazy" decoding="async"
+              <img src={sizedMockup(img.src, 100)} alt="" loading="lazy" decoding="async"
                 className="w-12 h-12 object-cover rounded-sm" style={{ background: "#fff" }} />
             </button>
           ))}
@@ -1188,14 +1208,29 @@ function ImageCarousel({ images }: { images: Array<{ src: string }> }) {
 // One self-contained "webshop tile" per product: its own preview carousel,
 // size picker, quantity, and order form — same shape a real product page
 // on a webshop would have, just for a physical print-on-demand product.
-function ProductCard({ productKey, label, emoji, productId }: {
+function ProductCard({ productKey, label, emoji, productId, onReady }: {
   productKey: string; label: string; emoji: string; productId: string | null;
+  onReady: (key: string) => void;
 }) {
   const utils = trpc.useUtils();
   const { data: product, refetch: refetchProduct } = trpc.admin.shop.getProduct.useQuery(
     { productKey }, { enabled: !!productId }
   );
   const [settingUp, setSettingUp] = useState(false);
+
+  // Report readiness to the tab-level loading screen: a card counts as ready
+  // once its product data AND its first mockup image have arrived (or
+  // immediately when there's nothing to load / loading fails).
+  useEffect(() => {
+    if (!productId) { onReady(productKey); return; }
+    if (!product) return;
+    const firstSrc = product.images[0]?.src;
+    if (!firstSrc) { onReady(productKey); return; }
+    const img = new Image();
+    img.onload = () => onReady(productKey);
+    img.onerror = () => onReady(productKey);
+    img.src = sizedMockup(firstSrc, 400);
+  }, [productId, product, productKey, onReady]);
   const [selectedVariantId, setSelectedVariantId] = useState<number | null>(null);
   // A roll already contains 50-250 stickers, so it defaults to 1; everything
   // else defaults to a small batch of 5.
@@ -1440,7 +1475,23 @@ function ProductCard({ productKey, label, emoji, productId }: {
 }
 
 function ShopTab() {
-  const { data: status } = trpc.admin.shop.status.useQuery();
+  const { data: status, isLoading: statusLoading } = trpc.admin.shop.status.useQuery();
+  // The tab stays behind one loading screen until every product card has its
+  // data AND first image in — content appears all at once instead of popping
+  // in piecemeal. A safety timeout keeps a single broken image from holding
+  // the whole tab hostage.
+  const [readyKeys, setReadyKeys] = useState<Record<string, boolean>>({});
+  const [timedOut, setTimedOut] = useState(false);
+  const markReady = useCallback((key: string) => {
+    setReadyKeys((prev) => (prev[key] ? prev : { ...prev, [key]: true }));
+  }, []);
+  useEffect(() => {
+    const t = setTimeout(() => setTimedOut(true), 8000);
+    return () => clearTimeout(t);
+  }, []);
+  const allReady = timedOut || (!!status && SHOP_PRODUCT_DEFS.every((d) => readyKeys[d.key]));
+
+  if (statusLoading) return <TabLoader />;
 
   if (!status?.configured) {
     return (
@@ -1452,17 +1503,24 @@ function ShopTab() {
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      {SHOP_PRODUCT_DEFS.map((def) => (
-        <ProductCard key={def.key} productKey={def.key} label={def.label} emoji={def.emoji}
-          productId={status.products[def.key] ?? null} />
-      ))}
+    <div className="relative">
+      {!allReady && (
+        <div className="absolute inset-0 z-10">
+          <TabLoader />
+        </div>
+      )}
+      <div className={`grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 ${allReady ? "" : "invisible"}`}>
+        {SHOP_PRODUCT_DEFS.map((def) => (
+          <ProductCard key={def.key} productKey={def.key} label={def.label} emoji={def.emoji}
+            productId={status.products[def.key] ?? null} onReady={markReady} />
+        ))}
+      </div>
     </div>
   );
 }
 
 function SettingsTab() {
-  const { data: settings, refetch } = trpc.admin.getSettings.useQuery();
+  const { data: settings, isLoading: settingsLoading, refetch } = trpc.admin.getSettings.useQuery();
   const updateMutation = trpc.admin.updateSetting.useMutation({
     onSuccess: () => { refetch(); toast.success("Opgeslagen!"); },
   });
@@ -1480,6 +1538,8 @@ function SettingsTab() {
   }, [settings]);
 
   const tableNumberEnabled = settings?.find((s) => s.key === "table_number_enabled")?.value === "true";
+
+  if (settingsLoading) return <TabLoader />;
 
   return (
     <div className="flex flex-col gap-4">
