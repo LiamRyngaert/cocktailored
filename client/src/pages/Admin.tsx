@@ -176,17 +176,21 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-function buildCardCanvas(qrCanvas: HTMLCanvasElement, outerRadius = 56, vPad = 0): HTMLCanvasElement {
+function buildCardCanvas(qrCanvas: HTMLCanvasElement, outerRadius = 56, vPad = 0, scale = 1): HTMLCanvasElement {
   // QR 620 (not 640) so the brand footer can sit higher: the header's ink
   // starts ~46px from the top, and the footer's ink now ends ~46px from the
   // bottom — equal top/bottom margins. vPad adds extra symmetric breathing
   // room for products whose die-cut/print edge sits tight on the design
   // (sticker rolls, coasters): header moves down, footer moves up, and the
   // QR shrinks to keep everything clear.
+  // scale multiplies the output resolution without touching the layout: all
+  // coordinates stay in the 900×900 design space and the context transform
+  // maps them up — used to produce print-resolution files for Printify.
   const SIZE = 900, QR = 620 - vPad * 2;
   const off = document.createElement("canvas");
-  off.width = SIZE; off.height = SIZE;
+  off.width = SIZE * scale; off.height = SIZE * scale;
   const ctx = off.getContext("2d")!;
+  ctx.scale(scale, scale);
   const r = outerRadius;
   ctx.save();
   ctx.beginPath();
@@ -224,8 +228,9 @@ function buildCardCanvas(qrCanvas: HTMLCanvasElement, outerRadius = 56, vPad = 0
   ctx.fillStyle = sG2;
   drawTextSpaced(ctx, word2, line2StartX + w1W, 106 + vPad, SSP);
   const qrBox = document.createElement("canvas");
-  qrBox.width = QR; qrBox.height = QR;
+  qrBox.width = QR * scale; qrBox.height = QR * scale;
   const qc = qrBox.getContext("2d")!;
+  qc.scale(scale, scale);
   const ir = 6, pw = QR * 0.02;
   const roundedPath = (c: CanvasRenderingContext2D, w: number, h: number, rr: number) => {
     c.beginPath();
@@ -240,7 +245,7 @@ function buildCardCanvas(qrCanvas: HTMLCanvasElement, outerRadius = 56, vPad = 0
   qc.save(); roundedPath(qc, QR, QR, ir); qc.clip();
   qc.drawImage(qrCanvas, pw, pw, QR - pw * 2, QR - pw * 2);
   qc.restore();
-  ctx.drawImage(qrBox, (SIZE - QR) / 2, (SIZE - QR) / 2 + 10);
+  ctx.drawImage(qrBox, (SIZE - QR) / 2, (SIZE - QR) / 2 + 10, QR, QR);
   // Brand name now sits BELOW the QR code.
   ctx.font = "800 76px system-ui, sans-serif";
   const SP = 2;
@@ -839,12 +844,13 @@ function QRCodesTab() {
     let cancelled = false;
     (async () => {
       try {
-        const size = 400;
-        const styled = renderRoundedQR(QR_URL, size, 0);
+        // High-res render (QR near its final pixel size, card at 3×) so the
+        // PNG/PDF downloads print sharp instead of upscaling a 400px QR.
+        const styled = renderRoundedQR(QR_URL, 1800, 0);
         const logoImg = await loadImage("/brand/cocktail-logo.jpeg");
         if (cancelled) return;
         drawCenterLogo(styled, logoImg);
-        const card = buildCardCanvas(styled);
+        const card = buildCardCanvas(styled, 56, 0, 3);
         setCardDataUrl(card.toDataURL("image/png"));
         setLoading(false);
       } catch {
@@ -1115,11 +1121,14 @@ const PRODUCT_ARTWORK_VPAD: Record<string, number> = {
 };
 
 async function buildProductArtwork(productKey: string): Promise<string> {
-  const size = 400;
-  const styled = renderRoundedQR(QR_URL, size, 0);
+  // Print-resolution output: the QR is rendered at ~its final pixel size in
+  // the 3×-scaled card (2700×2700) instead of being upscaled from 400px,
+  // so print files and Printify's generated mockups come out sharp.
+  const PRINT_SCALE = 3;
+  const styled = renderRoundedQR(QR_URL, 1800, 0);
   const logoImg = await loadImage("/brand/cocktail-logo.jpeg");
   drawCenterLogo(styled, logoImg);
-  const card = buildCardCanvas(styled, 0, PRODUCT_ARTWORK_VPAD[productKey] ?? 0);
+  const card = buildCardCanvas(styled, 0, PRODUCT_ARTWORK_VPAD[productKey] ?? 0, PRINT_SCALE);
   return card.toDataURL("image/png");
 }
 
