@@ -1142,29 +1142,44 @@ const SHOP_PRODUCT_DEFS: Array<{ key: string; label: string; emoji: string }> = 
 // A product-page-style image carousel — one photo at a time, prev/next
 // arrows, dot indicators — the way a real webshop shows product photos
 // instead of a flat grid of thumbnails.
+// Printify's mockup CDN accepts an `s=` size hint (verified: s=320 returns a
+// 400px file instead of the full 1200px) — request appropriately-sized files
+// so the grid doesn't download megabytes of full-res mockups.
+function sizedMockup(src: string, s: number): string {
+  return src + (src.includes("?") ? "&" : "?") + "s=" + s;
+}
+
 function ImageCarousel({ images }: { images: Array<{ src: string }> }) {
   const [idx, setIdx] = useState(0);
   if (images.length === 0) return null;
   const i = Math.min(idx, images.length - 1);
   return (
-    <div className="relative">
-      <img src={images[i].src} alt="" className="w-full aspect-square object-cover rounded-md"
-        style={{ background: "#fff", border: "1px solid rgba(255,255,255,0.1)" }} />
+    <div>
+      <div className="relative">
+        <img src={sizedMockup(images[i].src, 800)} alt="" loading="lazy" decoding="async"
+          className="w-full aspect-square object-cover rounded-md"
+          style={{ background: "#fff", border: "1px solid rgba(255,255,255,0.1)" }} />
+        {images.length > 1 && (
+          <>
+            <button onClick={() => setIdx((v) => (v - 1 + images.length) % images.length)}
+              className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full flex items-center justify-center text-white text-sm"
+              style={{ background: "rgba(0,0,0,0.55)" }}>‹</button>
+            <button onClick={() => setIdx((v) => (v + 1) % images.length)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full flex items-center justify-center text-white text-sm"
+              style={{ background: "rgba(0,0,0,0.55)" }}>›</button>
+          </>
+        )}
+      </div>
       {images.length > 1 && (
-        <>
-          <button onClick={() => setIdx((v) => (v - 1 + images.length) % images.length)}
-            className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full flex items-center justify-center text-white text-sm"
-            style={{ background: "rgba(0,0,0,0.55)" }}>‹</button>
-          <button onClick={() => setIdx((v) => (v + 1) % images.length)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-full flex items-center justify-center text-white text-sm"
-            style={{ background: "rgba(0,0,0,0.55)" }}>›</button>
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1.5">
-            {images.map((_, dotIdx) => (
-              <div key={dotIdx} className="w-1.5 h-1.5 rounded-full transition-all"
-                style={{ background: dotIdx === i ? "#ff6b35" : "rgba(255,255,255,0.4)" }} />
-            ))}
-          </div>
-        </>
+        <div className="flex gap-1.5 mt-1.5 overflow-x-auto pb-1">
+          {images.map((img, tIdx) => (
+            <button key={tIdx} onClick={() => setIdx(tIdx)} className="flex-shrink-0 rounded transition-all"
+              style={{ border: tIdx === i ? "2px solid #ff6b35" : "2px solid rgba(255,255,255,0.12)", padding: 0, lineHeight: 0 }}>
+              <img src={sizedMockup(img.src, 320)} alt="" loading="lazy" decoding="async"
+                className="w-12 h-12 object-cover rounded-sm" style={{ background: "#fff" }} />
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );
