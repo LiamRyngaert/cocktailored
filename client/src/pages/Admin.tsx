@@ -1052,57 +1052,6 @@ function QRCodesTab() {
   );
 }
 
-// ── Settings tab ─────────────────────────────────────────────────────────────
-
-function BackendStatusCard() {
-  // Polls the backend every 20s so the bar can see at a glance whether the
-  // site is still linked to its durable database (and not silently running on
-  // the ephemeral in-memory fallback, which loses orders on serverless).
-  const { data, isLoading, isError, dataUpdatedAt } = trpc.system.status.useQuery(undefined, {
-    refetchInterval: 20_000,
-    refetchOnWindowFocus: true,
-    retry: 1,
-  });
-
-  const ok = data?.ok === true;
-  const mode = data?.db.mode;
-  const durable = ok && mode === "database";
-  const color = isLoading ? "#f59e0b" : durable ? "#10b981" : ok && mode === "memory" ? "#f59e0b" : "#ef4444";
-  const label = isLoading
-    ? "Verbinding controleren..."
-    : isError
-      ? "Backend onbereikbaar"
-      : durable
-        ? "Verbonden met database"
-        : mode === "memory"
-          ? "Tijdelijke opslag (NIET veilig)"
-          : "Database onbereikbaar";
-  const sub = isLoading
-    ? "Even geduld"
-    : durable
-      ? `Alles werkt. Reactietijd ${data?.db.latencyMs ?? "?"} ms.`
-      : mode === "memory"
-        ? "Er is geen DATABASE_URL ingesteld. Bestellingen kunnen verloren gaan. Stel een database in via Vercel."
-        : `De database antwoordt niet${data?.db.error ? `: ${data.db.error}` : "."}`;
-  const lastChecked = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : null;
-
-  return (
-    <div className="rounded-md p-5" style={{ background: `${color}12`, border: `1.5px solid ${color}45` }}>
-      <div className="flex items-center gap-3">
-        <div className="relative flex-shrink-0">
-          <div className="w-3 h-3 rounded-full" style={{ background: color, boxShadow: `0 0 10px ${color}` }} />
-          {durable && <div className="absolute inset-0 w-3 h-3 rounded-full animate-ping" style={{ background: color, opacity: 0.6 }} />}
-        </div>
-        <div className="min-w-0">
-          <div className="text-white font-semibold text-sm">{label}</div>
-          <div className="text-white/50 text-xs mt-0.5">{sub}</div>
-          {lastChecked && <div className="text-white/25 text-[10px] mt-1">Laatst gecontroleerd om {lastChecked}</div>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Shop tab ─────────────────────────────────────────────────────────────────
 
 const SHOP_ADDRESS_KEY = "bb_shop_address";
@@ -1529,21 +1478,12 @@ function SettingsTab() {
     onSuccess: () => { utils.admin.getSessions.invalidate(); toast.success("Alle bestellingen zijn verwijderd."); },
     onError: () => toast.error("Er ging iets mis bij het verwijderen."),
   });
-  const [whatsapp, setWhatsapp] = useState("");
-  useEffect(() => {
-    if (settings) {
-      const wa = settings.find((s) => s.key === "whatsapp_number");
-      if (wa?.value) setWhatsapp(wa.value);
-    }
-  }, [settings]);
-
   const tableNumberEnabled = settings?.find((s) => s.key === "table_number_enabled")?.value === "true";
 
   if (settingsLoading) return <TabLoader />;
 
   return (
     <div className="flex flex-col gap-4">
-      <BackendStatusCard />
       <div className="rounded-md p-5 flex items-center justify-between gap-4" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
         <div>
           <div className="text-white font-semibold mb-1">Tafelnummer vragen</div>
@@ -1551,19 +1491,6 @@ function SettingsTab() {
         </div>
         <IngredientToggle available={tableNumberEnabled}
           onChange={() => updateMutation.mutate({ key: "table_number_enabled", value: tableNumberEnabled ? "false" : "true" })} />
-      </div>
-      <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
-        <div className="text-white font-semibold mb-1">WhatsApp Nummer</div>
-        <p className="text-white/40 text-xs mb-3">Nummer van de barman voor bestellingsmeldingen.</p>
-        <input type="text" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)}
-          className="w-full rounded-md px-3 py-2.5 text-white placeholder-white/30 outline-none mb-3 text-sm"
-          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} placeholder="+32..." />
-        <button onClick={() => updateMutation.mutate({ key: "whatsapp_number", value: whatsapp })}
-          disabled={updateMutation.isPending}
-          className="rounded-md px-4 py-2 font-bold text-black text-sm disabled:opacity-50"
-          style={{ background: "linear-gradient(135deg, #a855f7, #22d3ee)" }}>
-          {updateMutation.isPending ? "Opslaan..." : "Opslaan"}
-        </button>
       </div>
       <div className="rounded-md p-5" style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.25)" }}>
         <div className="text-white font-semibold mb-1">Alle bestellingen verwijderen</div>
