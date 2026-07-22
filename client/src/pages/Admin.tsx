@@ -1234,7 +1234,12 @@ function ProductCard({ productKey, label, emoji, productId }: {
   };
 
   const enabledVariants = (product?.variants ?? []).filter((v: { is_enabled: boolean }) => v.is_enabled);
-  const activeVariantId = selectedVariantId ?? enabledVariants[0]?.id ?? null;
+  // Default to the CHEAPEST variant (e.g. the 2"×2" sticker), not whatever
+  // Printify happens to list first (the huge 15"×15").
+  const cheapestVariant = enabledVariants.length > 0
+    ? enabledVariants.reduce((a, b) => (b.price < a.price ? b : a))
+    : null;
+  const activeVariantId = selectedVariantId ?? cheapestVariant?.id ?? null;
   const mockups = product?.images.filter((img: { variant_ids: number[] }) =>
     !activeVariantId || img.variant_ids.includes(activeVariantId)) ?? [];
   const startPrice = enabledVariants.length > 0
