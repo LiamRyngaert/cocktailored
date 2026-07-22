@@ -40,10 +40,13 @@ const SHOP_PRODUCTS: Record<string, {
   blueprintId: number; title: string; description: string; preferredProvider: string;
 }> = {
   sticker: {
-    blueprintId: 476,
+    // "Square Stickers" (blueprint 384, SPOKE Custom Products): square
+    // stickers cut with rounded corners — replaces the sharp-cornered
+    // Square Vinyl blueprint 476.
+    blueprintId: 384,
     title: "Cocktailored QR Sticker",
-    description: "Gepersonaliseerde QR-sticker die naar de Cocktailored cocktailquiz linkt.",
-    preferredProvider: "Printed Simply",
+    description: "Gepersonaliseerde QR-sticker (afgeronde hoeken) die naar de Cocktailored cocktailquiz linkt.",
+    preferredProvider: "SPOKE Custom Products",
   },
   sticker_roll: {
     blueprintId: 1387,
