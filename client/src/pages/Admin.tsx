@@ -1090,13 +1090,10 @@ const PRODUCT_ARTWORK_VPAD: Record<string, number> = {
 };
 
 // Outer corner radius per product (design-space px on the 900×900 card).
-// The die-cut sticker's cut follows the artwork shape, so rounding the
-// artwork corners (transparent outside) is what makes the physical sticker
-// rounded. Other products keep square artwork and let the product's own
-// cut/print area define the shape.
-const PRODUCT_ARTWORK_RADIUS: Record<string, number> = {
-  sticker: 56,
-};
+// The square vinyl sticker prints edge-to-edge, so its artwork must stay
+// fully opaque to the square edge — rounded/transparent corners would
+// print as white vinyl.
+const PRODUCT_ARTWORK_RADIUS: Record<string, number> = {};
 
 async function buildProductArtwork(productKey: string): Promise<string> {
   // Print-resolution output: the QR is rendered at ~its final pixel size in

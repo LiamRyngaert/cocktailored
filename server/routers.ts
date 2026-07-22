@@ -45,13 +45,14 @@ const SHOP_PRODUCTS: Record<string, {
   bleedScale?: number;
 }> = {
   sticker: {
-    // Die-Cut Stickers (blueprint 600): the cut follows the artwork's own
-    // shape, so the rounded-corner card PNG (transparent outside the
-    // radius) yields a rounded sticker printed edge-to-edge — unlike the
-    // SPOKE Square Stickers (384), which force a printed white border.
-    blueprintId: 600,
+    // Square Vinyl Stickers (476): the ONLY Printify sticker that prints
+    // truly edge-to-edge with zero white rim. Every rounded/die-cut
+    // alternative (384 SPOKE, 400 kiss-cut, 600 die-cut) physically cuts
+    // outside the printed area, leaving a white vinyl contour — tried and
+    // rejected. Corners are square but printed fully dark.
+    blueprintId: 476,
     title: "Cocktailored QR Sticker",
-    description: "Gepersonaliseerde QR-sticker (afgeronde hoeken) die naar de Cocktailored cocktailquiz linkt.",
+    description: "Gepersonaliseerde QR-sticker die naar de Cocktailored cocktailquiz linkt.",
     preferredProvider: "Printed Simply",
   },
   sticker_roll: {
