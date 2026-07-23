@@ -860,13 +860,6 @@ const QR_URL = "https://cocktailored.ai";
 function QRCodesTab() {
   const [cardDataUrl, setCardDataUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<"home" | "stickers">("home");
-  const [stickerQty, setStickerQty] = useState(5);
-  const [contactName, setContactName] = useState("");
-  const [contactEmail, setContactEmail] = useState("");
-  const [contactAddress, setContactAddress] = useState("");
-  const [ordering, setOrdering] = useState(false);
-  const [orderDone, setOrderDone] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -903,98 +896,6 @@ function QRCodesTab() {
     a.href = cardDataUrl;
     a.click();
   };
-
-  const placeOrder = async () => {
-    if (!contactName.trim() || !contactEmail.trim() || !contactAddress.trim()) {
-      toast.error("Vul alle velden in."); return;
-    }
-    setOrdering(true);
-    await new Promise((r) => setTimeout(r, 2200));
-    setOrderDone(true);
-    setOrdering(false);
-  };
-
-  const stickerPrice = (stickerQty / 5) * 10;
-
-  if (view === "stickers") {
-    return (
-      <div>
-        <button onClick={() => { setView("home"); setOrderDone(false); }}
-          className="flex items-center gap-2 text-white/50 hover:text-white text-sm mb-5 transition-colors">
-          ← Terug
-        </button>
-
-        {orderDone ? (
-          <div className="flex flex-col items-center text-center py-8">
-            <div className="text-6xl mb-4">🎉</div>
-            <h3 className="font-display text-2xl font-bold text-white mb-2">Bestelling geplaatst!</h3>
-            <p className="text-white/60 mb-1">Je {stickerQty} QR stickers worden vers gedrukt en verstuurd.</p>
-            <p className="text-white/40 text-sm">Verwachte levertijd: 3–5 werkdagen.</p>
-            <div className="mt-6 rounded-md p-4 text-left w-full max-w-sm" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              <div className="text-white/40 text-xs uppercase tracking-wider mb-2">Samenvatting</div>
-              <div className="flex justify-between text-sm mb-1"><span className="text-white/60">Stickers</span><span className="text-white font-bold">{stickerQty}x</span></div>
-              <div className="flex justify-between text-sm mb-1"><span className="text-white/60">Prijs per 5</span><span className="text-white">€10,00</span></div>
-              <div className="flex justify-between text-sm border-t border-white/10 pt-2 mt-2"><span className="text-white font-semibold">Totaal</span><span className="font-bold" style={{ color: "#ff6b35" }}>€{stickerPrice.toFixed(2)}</span></div>
-            </div>
-            <button onClick={() => { setOrderDone(false); setView("home"); }}
-              className="mt-5 text-white/30 hover:text-white/60 text-sm underline transition-colors">
-              Nieuwe bestelling
-            </button>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-4">
-            {cardDataUrl && (
-              <img src={cardDataUrl} alt="QR kaartje preview" className="w-full max-w-xs mx-auto rounded-xl" />
-            )}
-            <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
-              <div className="font-semibold text-white mb-1">Aantal stickers</div>
-              <p className="text-white/40 text-xs mb-3">Per 5 stuks voor €10,00.</p>
-              <div className="flex gap-2 flex-wrap mb-3">
-                {[5, 10, 15, 20, 25, 50].map((qty) => (
-                  <button key={qty} onClick={() => setStickerQty(qty)}
-                    className="rounded-md px-4 py-2 text-sm font-bold transition-all"
-                    style={{ background: stickerQty === qty ? "rgba(255,107,53,0.25)" : "rgba(255,255,255,0.06)", border: stickerQty === qty ? "1.5px solid #ff6b35" : "1px solid rgba(255,255,255,0.1)", color: stickerQty === qty ? "#ff6b35" : "rgba(255,255,255,0.6)" }}>
-                    {qty}x
-                  </button>
-                ))}
-              </div>
-              <div className="flex items-center justify-between rounded-md px-4 py-3" style={{ background: "rgba(255,107,53,0.1)", border: "1px solid rgba(255,107,53,0.25)" }}>
-                <span className="text-white/60 text-sm">{stickerQty} stickers</span>
-                <span className="font-display text-xl font-bold" style={{ color: "#ff6b35" }}>€{stickerPrice.toFixed(2)}</span>
-              </div>
-            </div>
-
-            <div className="rounded-md p-5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)" }}>
-              <div className="font-semibold text-white mb-3">Leveringsgegevens</div>
-              {[
-                { label: "Naam", value: contactName, set: setContactName, placeholder: "Jouw naam" },
-                { label: "E-mailadres", value: contactEmail, set: setContactEmail, placeholder: "jouw@email.com" },
-                { label: "Adres", value: contactAddress, set: setContactAddress, placeholder: "Straat, stad, land" },
-              ].map((f) => (
-                <div key={f.label} className="mb-3">
-                  <label className="block text-white/50 text-xs uppercase tracking-wider mb-1">{f.label}</label>
-                  <input type="text" value={f.value} onChange={(e) => f.set(e.target.value)} placeholder={f.placeholder}
-                    className="w-full rounded-md px-3 py-2.5 text-white placeholder-white/25 outline-none text-sm"
-                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }} />
-                </div>
-              ))}
-            </div>
-
-            <button onClick={placeOrder} disabled={ordering}
-              className="w-full rounded-md py-4 text-lg font-bold text-black transition-all duration-200 active:scale-95 disabled:opacity-60"
-              style={{ background: "linear-gradient(135deg, #ff9a00, #ff3cac)", boxShadow: "0 0 32px rgba(255,154,0,0.4)" }}>
-              {ordering ? (
-                <span className="flex items-center justify-center gap-3">
-                  <span className="inline-block w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
-                  Bestelling verwerken...
-                </span>
-              ) : `Bestel ${stickerQty} stickers — €${stickerPrice.toFixed(2)}`}
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -1037,22 +938,6 @@ function QRCodesTab() {
         </div>
       </button>
 
-      <button onClick={() => setView("stickers")}
-        className="w-full rounded-xl p-5 text-left transition-all duration-150 hover:border-white/20 active:scale-99"
-        style={{ background: "rgba(168,85,247,0.08)", border: "1.5px solid rgba(168,85,247,0.25)" }}>
-        <div className="flex items-center gap-4">
-          <div className="w-11 h-11 rounded-lg flex items-center justify-center text-2xl flex-shrink-0"
-            style={{ background: "linear-gradient(135deg, #a855f7, #ec4899)" }}>🏷</div>
-          <div>
-            <div className="font-bold text-white flex items-center gap-2">
-              Stickers bestellen
-              <span className="text-xs rounded px-2 py-0.5 font-bold" style={{ background: "rgba(168,85,247,0.25)", color: "#a855f7" }}>NIEUW</span>
-            </div>
-            <p className="text-white/40 text-xs mt-0.5">Professioneel gedrukt — €10 per 5 stuks, rechtstreeks aan de deur.</p>
-          </div>
-          <span className="text-white/30 ml-auto">→</span>
-        </div>
-      </button>
     </div>
   );
 }
