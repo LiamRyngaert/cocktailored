@@ -176,7 +176,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-function buildCardCanvas(qrCanvas: HTMLCanvasElement, outerRadius = 56, vPad = 0, scale = 1): HTMLCanvasElement {
+function buildCardCanvas(qrCanvas: HTMLCanvasElement, outerRadius = 56, vPad = 0, scale = 1, cornerFill?: string): HTMLCanvasElement {
   // QR 620 (not 640) so the brand footer can sit higher: the header's ink
   // starts ~46px from the top, and the footer's ink now ends ~46px from the
   // bottom — equal top/bottom margins. vPad adds extra symmetric breathing
@@ -192,13 +192,25 @@ function buildCardCanvas(qrCanvas: HTMLCanvasElement, outerRadius = 56, vPad = 0
   const ctx = off.getContext("2d")!;
   ctx.scale(scale, scale);
   const r = outerRadius;
+  const outerPath = () => {
+    ctx.beginPath();
+    ctx.moveTo(r, 0); ctx.lineTo(SIZE - r, 0); ctx.quadraticCurveTo(SIZE, 0, SIZE, r);
+    ctx.lineTo(SIZE, SIZE - r); ctx.quadraticCurveTo(SIZE, SIZE, SIZE - r, SIZE);
+    ctx.lineTo(r, SIZE); ctx.quadraticCurveTo(0, SIZE, 0, SIZE - r);
+    ctx.lineTo(0, r); ctx.quadraticCurveTo(0, 0, r, 0);
+    ctx.closePath();
+  };
+  // cornerFill paints the area OUTSIDE the rounded card (normally left
+  // transparent) in a solid color. Used for edge-to-edge square prints
+  // (vinyl sticker) where transparent corners would print white: black
+  // corners keep the rounded-card look without any white rim.
+  if (cornerFill) {
+    ctx.fillStyle = cornerFill;
+    ctx.fillRect(0, 0, SIZE, SIZE);
+  }
   ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(r, 0); ctx.lineTo(SIZE - r, 0); ctx.quadraticCurveTo(SIZE, 0, SIZE, r);
-  ctx.lineTo(SIZE, SIZE - r); ctx.quadraticCurveTo(SIZE, SIZE, SIZE - r, SIZE);
-  ctx.lineTo(r, SIZE); ctx.quadraticCurveTo(0, SIZE, 0, SIZE - r);
-  ctx.lineTo(0, r); ctx.quadraticCurveTo(0, 0, r, 0);
-  ctx.closePath(); ctx.clip();
+  outerPath();
+  ctx.clip();
   ctx.fillStyle = "#0a0a0a"; ctx.fillRect(0, 0, SIZE, SIZE);
   drawRadialBlob(ctx, 0, 0, 280, "rgba(180,60,20,0.55)");
   drawRadialBlob(ctx, SIZE, SIZE, 300, "rgba(60,20,100,0.65)");
@@ -264,6 +276,14 @@ function buildCardCanvas(qrCanvas: HTMLCanvasElement, outerRadius = 56, vPad = 0
   ctx.fillStyle = gT;
   drawTextSpaced(ctx, "ored", sx + cW, SIZE - 84 - vPad, SP);
   ctx.restore();
+  // With filled corners the rounded card edge needs a subtle outline to
+  // stay visible against the near-black corners.
+  if (cornerFill) {
+    outerPath();
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
   return off;
 }
 
@@ -980,10 +1000,15 @@ const PRODUCT_ARTWORK_VPAD: Record<string, number> = {
 };
 
 // Outer corner radius per product (design-space px on the 900×900 card).
-// The square vinyl sticker prints edge-to-edge, so its artwork must stay
-// fully opaque to the square edge — rounded/transparent corners would
-// print as white vinyl.
-const PRODUCT_ARTWORK_RADIUS: Record<string, number> = {};
+// The square vinyl sticker prints edge-to-edge (only rim-free option), so
+// its rounded-card look comes from BLACK-filled corners around the radius
+// — never transparency, which would print as white vinyl.
+const PRODUCT_ARTWORK_RADIUS: Record<string, number> = {
+  sticker: 56,
+};
+const PRODUCT_ARTWORK_CORNER_FILL: Record<string, string> = {
+  sticker: "#000000",
+};
 
 async function buildProductArtwork(productKey: string): Promise<string> {
   // Print-resolution output in the 3×-scaled card (2700×2700). The QR is
@@ -999,7 +1024,7 @@ async function buildProductArtwork(productKey: string): Promise<string> {
   const styled = renderRoundedQR(QR_URL, qrPx, 0);
   const logoImg = await loadImage("/brand/cocktail-logo.jpeg");
   drawCenterLogo(styled, logoImg);
-  const card = buildCardCanvas(styled, PRODUCT_ARTWORK_RADIUS[productKey] ?? 0, vPad, PRINT_SCALE);
+  const card = buildCardCanvas(styled, PRODUCT_ARTWORK_RADIUS[productKey] ?? 0, vPad, PRINT_SCALE, PRODUCT_ARTWORK_CORNER_FILL[productKey]);
   return card.toDataURL("image/png");
 }
 
