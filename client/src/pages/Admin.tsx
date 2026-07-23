@@ -243,7 +243,12 @@ function buildCardCanvas(qrCanvas: HTMLCanvasElement, outerRadius = 56, vPad = 0
   qc.fillStyle = "#0a0a0a"; qc.strokeStyle = "rgba(255,255,255,0.07)"; qc.lineWidth = 3;
   roundedPath(qc, QR, QR, ir); qc.fill(); qc.stroke();
   qc.save(); roundedPath(qc, QR, QR, ir); qc.clip();
+  // The QR canvas is rendered at (near-)exactly this destination size, so
+  // disable smoothing: any residual sub-pixel rescale then snaps to hard
+  // edges instead of blurring the QR modules.
+  qc.imageSmoothingEnabled = false;
   qc.drawImage(qrCanvas, pw, pw, QR - pw * 2, QR - pw * 2);
+  qc.imageSmoothingEnabled = true;
   qc.restore();
   ctx.drawImage(qrBox, (SIZE - QR) / 2, (SIZE - QR) / 2 + 10, QR, QR);
   // Brand name now sits BELOW the QR code.
@@ -867,9 +872,9 @@ function QRCodesTab() {
     let cancelled = false;
     (async () => {
       try {
-        // High-res render (QR near its final pixel size, card at 3×) so the
-        // PNG/PDF downloads print sharp instead of upscaling a 400px QR.
-        const styled = renderRoundedQR(QR_URL, 1800, 0);
+        // High-res render (QR at exactly its final pixel size, card at 3×)
+        // so the PNG/PDF downloads print sharp with no QR resampling.
+        const styled = renderRoundedQR(QR_URL, Math.round(620 * 0.96 * 3), 0);
         const logoImg = await loadImage("/brand/cocktail-logo.jpeg");
         if (cancelled) return;
         drawCenterLogo(styled, logoImg);
@@ -1096,14 +1101,20 @@ const PRODUCT_ARTWORK_VPAD: Record<string, number> = {
 const PRODUCT_ARTWORK_RADIUS: Record<string, number> = {};
 
 async function buildProductArtwork(productKey: string): Promise<string> {
-  // Print-resolution output: the QR is rendered at ~its final pixel size in
-  // the 3×-scaled card (2700×2700) instead of being upscaled from 400px,
-  // so print files and Printify's generated mockups come out sharp.
+  // Print-resolution output in the 3×-scaled card (2700×2700). The QR is
+  // rendered at EXACTLY the pixel size it occupies inside the card — a
+  // 1:1 draw with no resampling, so the hard module edges stay pixel-crisp
+  // instead of being smeared by a fractional rescale.
   const PRINT_SCALE = 3;
-  const styled = renderRoundedQR(QR_URL, 1800, 0);
+  const vPad = PRODUCT_ARTWORK_VPAD[productKey] ?? 0;
+  // Mirrors buildCardCanvas geometry: QR box = 620 - 2·vPad design px, with
+  // 2% padding on each side inside the box, times the print scale.
+  const qrBox = 620 - vPad * 2;
+  const qrPx = Math.round((qrBox - 2 * qrBox * 0.02) * PRINT_SCALE);
+  const styled = renderRoundedQR(QR_URL, qrPx, 0);
   const logoImg = await loadImage("/brand/cocktail-logo.jpeg");
   drawCenterLogo(styled, logoImg);
-  const card = buildCardCanvas(styled, PRODUCT_ARTWORK_RADIUS[productKey] ?? 0, PRODUCT_ARTWORK_VPAD[productKey] ?? 0, PRINT_SCALE);
+  const card = buildCardCanvas(styled, PRODUCT_ARTWORK_RADIUS[productKey] ?? 0, vPad, PRINT_SCALE);
   return card.toDataURL("image/png");
 }
 
@@ -1131,7 +1142,7 @@ function ImageCarousel({ images }: { images: Array<{ src: string }> }) {
   return (
     <div>
       <div className="relative">
-        <img src={sizedMockup(images[i].src, 400)} alt="" loading="lazy" decoding="async"
+        <img src={images[i].src} alt="" loading="lazy" decoding="async"
           className="w-full aspect-square object-cover rounded-md"
           style={{ background: "#fff", border: "1px solid rgba(255,255,255,0.1)" }} />
         {images.length > 1 && (
