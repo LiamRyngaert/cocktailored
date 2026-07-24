@@ -87,9 +87,6 @@ const SHOP_ADDRESS_SCHEMA = z.object({
   zip: z.string().min(1),
 });
 
-// The single LeadConnector webhook the bar's automations listen on.
-const WEBHOOK_URL = "https://services.leadconnectorhq.com/hooks/8nDL9BCU3hp9982tGYT1/webhook-trigger/71aa3d40-0ead-46d9-9255-2bbe7caa770d";
-
 function sanitizeText(input: string): string {
   return input.replace(/<[^>]*>/g, "").trim();
 }
@@ -869,8 +866,9 @@ Rules:
         // user's result. Delivery retries with backoff; on success we flip the
         // webhookSent flag.
         runBackground(async () => {
+          const whatsappNumber = (await getAdminSetting("whatsapp_number")) ?? "+32492532305";
           const ok = await deliverWebhook(
-            WEBHOOK_URL,
+            ENV.webhookUrl,
             {
               event: "cocktail_quiz_completed",
               sessionId,
@@ -882,7 +880,7 @@ Rules:
               flavorProfile: result.flavorProfile,
               recipes: result.recipes,
               quizAnswers: input.answers,
-              whatsappNumber: "+32492532305",
+              whatsappNumber,
             },
             { label: "quiz-webhook" }
           );
@@ -988,7 +986,7 @@ Rules:
         const selectedRecipe = recipes?.[input.selectedRecipeIndex] ?? recipes?.[0];
         runBackground(() =>
           deliverWebhook(
-            WEBHOOK_URL,
+            ENV.webhookUrl,
             {
               event: "order_submitted",
               sessionId: input.sessionId,

@@ -16,6 +16,9 @@ export const ENV = {
   // that appears in Printify's own dashboard URLs, which is just a route
   // index, not the API shop id).
   printifyShopId: process.env.PRINTIFY_SHOP_ID ?? "25691872",
+  // The single LeadConnector webhook the bar's automations listen on.
+  webhookUrl: process.env.LEADCONNECTOR_WEBHOOK_URL
+    ?? "https://services.leadconnectorhq.com/hooks/8nDL9BCU3hp9982tGYT1/webhook-trigger/71aa3d40-0ead-46d9-9255-2bbe7caa770d",
   // Legacy stubs — unused, kept for compilation only
   appId: "",
   oAuthServerUrl: "",
