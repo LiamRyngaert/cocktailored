@@ -43,7 +43,7 @@
 - [x] Ingredient list in ml
 
 ## Admin Panel
-- [x] Login page (liam / liam1234)
+- [x] Login page (credentials via ADMIN_USERNAME / ADMIN_PASSWORD env vars)
 - [x] Ingredient checklist database (pre-populated with 50+ ingredients)
 - [x] Custom ingredient add/remove
 - [x] Webhook URL configuration
